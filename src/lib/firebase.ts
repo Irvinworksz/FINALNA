@@ -8,6 +8,9 @@ import {
   sendPasswordResetEmail,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  type ConfirmationResult,
   type User as FirebaseUser
 } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
@@ -260,4 +263,145 @@ export async function verifyFirebasePassword(email: string, password: string): P
     };
   }
 }
+
+/**
+ * Formats a domestic Philippine mobile phone number to international E.164 standard (+639XXXXXXXXX)
+ */
+export function formatToPhilippineE164(contactNumber: string): string {
+  if (!contactNumber) return '';
+  const digitsOnly = contactNumber.replace(/[^0-9]/g, '');
+  if (digitsOnly.startsWith('63') && digitsOnly.length === 12) {
+    return `+${digitsOnly}`;
+  }
+  if (digitsOnly.startsWith('09') && digitsOnly.length === 11) {
+    return `+63${digitsOnly.slice(1)}`;
+  }
+  if (digitsOnly.startsWith('9') && digitsOnly.length === 10) {
+    return `+63${digitsOnly}`;
+  }
+  if (contactNumber.startsWith('+')) {
+    return contactNumber;
+  }
+  return `+63${digitsOnly}`;
+}
+
+/**
+ * Masks a phone number for secure display in the UI (e.g. +63 9•• ••• •567)
+ */
+export function maskPhilippinePhoneNumber(phoneNumber: string): string {
+  if (!phoneNumber) return '••••••••••';
+  const clean = phoneNumber.trim();
+  if (clean.length < 8) return '••••••••••';
+  const last3 = clean.slice(-3);
+  const prefix = clean.startsWith('+63') ? '+63 9•• ••• •' : '09•• ••• •';
+  return `${prefix}${last3}`;
+}
+
+/**
+ * Manages invisible RecaptchaVerifier instance for Firebase Phone Auth
+ */
+let appVerifierInstance: RecaptchaVerifier | null = null;
+
+export function setupPhoneRecaptcha(containerId = 'recaptcha-container'): RecaptchaVerifier | null {
+  try {
+    if (!auth || typeof window === 'undefined') return null;
+
+    // If an existing verifier is attached, clear it to avoid container collision
+    if (appVerifierInstance) {
+      try {
+        appVerifierInstance.clear();
+      } catch (e) {
+        // ignore clear errors
+      }
+      appVerifierInstance = null;
+    }
+
+    let container = document.getElementById(containerId);
+    if (!container) {
+      container = document.createElement('div');
+      container.id = containerId;
+      document.body.appendChild(container);
+    }
+
+    appVerifierInstance = new RecaptchaVerifier(auth, containerId, {
+      size: 'invisible',
+      callback: () => {
+        console.info('[Firebase Phone Auth] reCAPTCHA verified successfully.');
+      },
+      'expired-callback': () => {
+        console.warn('[Firebase Phone Auth] reCAPTCHA response expired.');
+      }
+    });
+
+    return appVerifierInstance;
+  } catch (err) {
+    console.warn('[Firebase Phone Auth] Error initializing RecaptchaVerifier:', err);
+    return null;
+  }
+}
+
+/**
+ * Sends a real 6-digit SMS verification code to the resident's mobile number via Firebase Phone Auth
+ */
+export async function sendFirebasePhoneOtp(
+  phoneNumber: string,
+  appVerifier?: RecaptchaVerifier | null
+): Promise<{
+  success: boolean;
+  confirmationResult?: ConfirmationResult;
+  error?: string;
+  code?: string;
+}> {
+  try {
+    const formattedPhone = formatToPhilippineE164(phoneNumber);
+    if (!formattedPhone || formattedPhone.length < 11) {
+      return {
+        success: false,
+        error: 'Invalid mobile phone number format.'
+      };
+    }
+
+    const verifier = appVerifier || setupPhoneRecaptcha('recaptcha-container');
+    if (!verifier) {
+      return {
+        success: false,
+        error: 'Failed to initialize security verification (reCAPTCHA). Switched to Email OTP.'
+      };
+    }
+
+    console.info(`[Firebase Phone Auth] Requesting SMS OTP for ${maskPhilippinePhoneNumber(formattedPhone)}...`);
+    const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
+    console.info(`[Firebase Phone Auth] SMS OTP dispatched successfully to ${maskPhilippinePhoneNumber(formattedPhone)}`);
+
+    return {
+      success: true,
+      confirmationResult
+    };
+  } catch (err: any) {
+    console.warn('[Firebase Phone Auth] sendFirebasePhoneOtp error:', err?.code, err?.message);
+    let userMsg = err?.message || 'Failed to dispatch SMS verification code.';
+    if (err?.code === 'auth/quota-exceeded') {
+      userMsg = 'SMS delivery quota reached on Firebase. Switched to Email OTP verification.';
+    } else if (err?.code === 'auth/invalid-phone-number') {
+      userMsg = 'The registered mobile phone number is invalid for SMS delivery.';
+    } else if (err?.code === 'auth/billing-not-enabled') {
+      userMsg = 'Firebase SMS carrier delivery requires a Blaze billing plan or adding test numbers in Firebase Console. Switched to Email OTP.';
+    } else if (err?.code === 'auth/too-many-requests') {
+      userMsg = 'Too many SMS requests sent to this number. Please wait a few minutes or switch to Email OTP.';
+    } else if (err?.code === 'auth/operation-not-allowed') {
+      userMsg = 'Phone authentication is not enabled in Firebase Console. Switched to Email OTP.';
+    } else if (err?.code === 'auth/unauthorized-domain') {
+      userMsg = 'Current domain is not authorized in Firebase Console -> Auth -> Settings -> Authorized Domains. Switched to Email OTP.';
+    } else if (err?.code === 'auth/captcha-check-failed' || err?.code === 'auth/invalid-app-credential') {
+      userMsg = 'Security verification could not verify this carrier session. Switched to Email OTP.';
+    }
+
+    return {
+      success: false,
+      code: err?.code,
+      error: userMsg
+    };
+  }
+}
+
 

@@ -3,12 +3,22 @@ import {
   AlertCircle, CheckCircle2, Eye, EyeOff, Lock, User, 
   HelpCircle, UploadCloud, X, Check, Mail, Phone,
   MapPin, Shield, ArrowRight, RefreshCw, KeyRound, UserPlus,
-  LogIn, FileText, Clipboard
+  LogIn, FileText, Clipboard, Sliders, Settings, Info, Copy, Edit3
 } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
+import { GmailSmtpModal } from './GmailSmtpModal';
 import { PasswordStrengthMeter } from './PasswordStrengthMeter';
-import { signInWithGoogleFirebase, registerUserInFirebaseAuth, verifyFirebasePassword } from '../lib/firebase';
+import { 
+  signInWithGoogleFirebase, 
+  registerUserInFirebaseAuth, 
+  verifyFirebasePassword,
+  setupPhoneRecaptcha,
+  sendFirebasePhoneOtp,
+  formatToPhilippineE164,
+  maskPhilippinePhoneNumber
+} from '../lib/firebase';
+import type { ConfirmationResult } from 'firebase/auth';
 import type { ResidentProfile, User as UserType } from '../types';
 
 interface SignInPageProps {
@@ -71,10 +81,18 @@ export const SignInPage: React.FC<SignInPageProps> = ({
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   
-  // MFA Challenge State (for accounts with 2FA enabled)
+  // MFA Challenge State (for resident accounts with Firebase SMS MFA & Email Fallback)
   const [mfaChallengeActive, setMfaChallengeActive] = useState<boolean>(false);
   const [mfaCode, setMfaCode] = useState<string>('');
+  const [mfaMode, setMfaMode] = useState<'sms' | 'email'>('sms');
+  const [smsConfirmationResult, setSmsConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [smsSending, setSmsSending] = useState<boolean>(false);
+  const [resendCooldown, setResendCooldown] = useState<number>(0);
   const [customDestinationEmail, setCustomDestinationEmail] = useState<string>('');
+  const [showGmailSmtp, setShowGmailSmtp] = useState<boolean>(false);
+  const [showPhoneEdit, setShowPhoneEdit] = useState<boolean>(false);
+  const [newPhoneInput, setNewPhoneInput] = useState<string>('');
+  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
   const [mfaTargetUser, setMfaTargetUser] = useState<{
     id: string;
     username: string;
@@ -82,6 +100,8 @@ export const SignInPage: React.FC<SignInPageProps> = ({
     fullName: string;
     email?: string;
     maskedEmail?: string;
+    phoneNumber?: string;
+    maskedPhone?: string;
     mfaType?: string;
     demoOtp?: string;
     emailDelivered?: boolean;
@@ -248,9 +268,24 @@ export const SignInPage: React.FC<SignInPageProps> = ({
     reader.readAsDataURL(file);
   };
 
+  // Resend cooldown timer for SMS OTP
+  useEffect(() => {
+    let timer: any;
+    if (resendCooldown > 0) {
+      timer = setInterval(() => {
+        setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
   const handleResetChallenge = () => {
     setMfaChallengeActive(false);
     setMfaCode('');
+    setMfaMode('sms');
+    setSmsConfirmationResult(null);
+    setSmsSending(false);
+    setResendCooldown(0);
     setMfaTargetUser(null);
     setErrorMsg('');
   };
@@ -396,12 +431,51 @@ export const SignInPage: React.FC<SignInPageProps> = ({
 
     // Case B: MFA 2-Factor Authentication Code Verification
     if (mfaChallengeActive) {
-      if (!mfaCode.trim()) {
-        setErrorMsg('Please enter the 6-digit security code.');
+      if (!mfaCode.trim() || mfaCode.trim().length !== 6) {
+        setErrorMsg('Please enter the 6-digit verification code.');
         return;
       }
 
       setLoading(true);
+      setErrorMsg('');
+
+      // If in SMS mode with active Firebase confirmationResult:
+      if (mfaMode === 'sms' && smsConfirmationResult) {
+        try {
+          const fbCred = await smsConfirmationResult.confirm(mfaCode.trim());
+          const idToken = await fbCred.user.getIdToken();
+
+          // Finalize session with barangay backend
+          const res = await apiClient.verifyMfa({
+            username: mfaTargetUser?.username || username,
+            userId: mfaTargetUser?.id,
+            firebaseSmsVerified: true,
+            idToken
+          });
+          setLoading(false);
+
+          if (res.success && res.user) {
+            onAuthSuccess(res.user, res.user.role === 'resident' ? res.profile : undefined);
+            handleResetChallenge();
+          } else {
+            setErrorMsg(res.error || 'Failed to complete session sign-in after SMS verification.');
+          }
+          return;
+        } catch (smsErr: any) {
+          setLoading(false);
+          console.warn('[MFA] Firebase SMS confirmation error:', smsErr?.code, smsErr?.message);
+          let friendly = 'Invalid or expired 6-digit SMS verification code. Please check your text messages and try again.';
+          if (smsErr?.code === 'auth/invalid-verification-code') {
+            friendly = 'Incorrect SMS verification code. Please double check the 6-digit code received on your phone.';
+          } else if (smsErr?.code === 'auth/code-expired') {
+            friendly = 'This SMS verification code has expired. Please click Resend SMS.';
+          }
+          setErrorMsg(friendly);
+          return;
+        }
+      }
+
+      // Email OTP fallback verification:
       const res = await apiClient.verifyMfa({
         username: mfaTargetUser?.username || username,
         userId: mfaTargetUser?.id,
@@ -413,7 +487,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
         onAuthSuccess(res.user, res.user.role === 'resident' ? res.profile : undefined);
         handleResetChallenge();
       } else {
-        setErrorMsg(res.error || 'Invalid 6-digit security code. Please check and try again.');
+        setErrorMsg(res.error || 'Invalid 6-digit security code. Please check your Gmail or request a new code.');
       }
       return;
     }
@@ -432,25 +506,48 @@ export const SignInPage: React.FC<SignInPageProps> = ({
     if (res.success) {
       setLoading(false);
       if (res.mfaRequired && !res.user) {
-        setMfaChallengeActive(true);
-        setMfaTargetUser({
+        const target = {
           id: res.userId || '',
           username: res.username || username,
           role: res.role || 'resident',
           fullName: res.fullName || username,
           email: res.email,
           maskedEmail: res.maskedEmail || `${username}@gmail.com`,
-          mfaType: res.mfaType || 'gmail',
-          demoOtp: res.demoOtp,
+          phoneNumber: res.phoneNumber,
+          maskedPhone: res.maskedPhone || (res.phoneNumber ? maskPhilippinePhoneNumber(res.phoneNumber) : ''),
+          mfaType: res.mfaType || 'sms',
           emailDelivered: res.emailDelivered,
           emailError: res.emailError
-        });
+        };
+        setMfaChallengeActive(true);
+        setMfaTargetUser(target);
         setMfaCode('');
-        setResetSuccessMsg(
-          res.emailDelivered
-            ? `Security code dispatched to your Gmail (${res.email || res.maskedEmail}).`
-            : `Security code generated for ${res.email || res.maskedEmail}.`
-        );
+
+        if (target.phoneNumber) {
+          setMfaMode('sms');
+          setSmsSending(true);
+          setResendCooldown(60);
+          sendFirebasePhoneOtp(target.phoneNumber)
+            .then((otpRes) => {
+              setSmsSending(false);
+              if (otpRes.success && otpRes.confirmationResult) {
+                setSmsConfirmationResult(otpRes.confirmationResult);
+                setResetSuccessMsg(`Firebase SMS verification code sent to ${target.maskedPhone || target.phoneNumber}.`);
+              } else {
+                console.warn('[MFA] Firebase SMS dispatch notice:', otpRes.error);
+                setMfaMode('email');
+                setErrorMsg(otpRes.error ? `${otpRes.error} (Switched to Email OTP)` : 'SMS unavailable. Verification code sent to your registered Gmail.');
+              }
+            })
+            .catch((err: any) => {
+              setSmsSending(false);
+              setMfaMode('email');
+              setErrorMsg('SMS carrier notice. Switched to Gmail Two-Factor.');
+            });
+        } else {
+          setMfaMode('email');
+          setResetSuccessMsg(`Security verification code sent to your registered Gmail (${target.maskedEmail}).`);
+        }
       } else if (res.user) {
         onAuthSuccess(res.user, res.user.role === 'resident' ? res.profile : undefined);
       }
@@ -514,8 +611,59 @@ export const SignInPage: React.FC<SignInPageProps> = ({
     }
   };
 
+  const handleResendSms = async () => {
+    if (!mfaTargetUser?.phoneNumber || resendCooldown > 0 || smsSending) return;
+    setSmsSending(true);
+    setErrorMsg('');
+    setResendCooldown(60);
+    const otpRes = await sendFirebasePhoneOtp(mfaTargetUser.phoneNumber);
+    setSmsSending(false);
+    if (otpRes.success && otpRes.confirmationResult) {
+      setSmsConfirmationResult(otpRes.confirmationResult);
+      setResetSuccessMsg(`A new Firebase SMS verification code was sent to ${mfaTargetUser.maskedPhone || mfaTargetUser.phoneNumber}.`);
+    } else {
+      setErrorMsg(otpRes.error || 'Failed to dispatch SMS. You may switch to Gmail verification below.');
+    }
+  };
+
+  const handleSwitchToEmailFallback = async () => {
+    setMfaMode('email');
+    setErrorMsg('');
+    setLoading(true);
+    const res = await apiClient.resendMfaOtp({
+      userId: mfaTargetUser?.id,
+      username: mfaTargetUser?.username
+    });
+    setLoading(false);
+    if (res.success) {
+      setMfaTargetUser((prev) => prev ? ({
+        ...prev,
+        email: res.email,
+        maskedEmail: res.maskedEmail,
+        emailDelivered: res.emailDelivered,
+        emailError: res.emailError
+      }) : null);
+      setResetSuccessMsg(`Switched to Gmail 2-Factor! A 6-digit verification code was sent to ${res.email || res.maskedEmail || 'your Gmail'}.`);
+    } else {
+      setResetSuccessMsg(`Switched to Gmail verification. Check your registered Gmail for the code.`);
+    }
+  };
+
+  const handleSwitchToSms = () => {
+    setMfaMode('sms');
+    setErrorMsg('');
+    if (!smsConfirmationResult && mfaTargetUser?.phoneNumber) {
+      handleResendSms();
+    }
+  };
+
   const handleResendMfaCode = async () => {
     if (!mfaTargetUser) return;
+    if (mfaMode === 'sms') {
+      await handleResendSms();
+      return;
+    }
+
     setLoading(true);
     setErrorMsg('');
     const emailToSend = customDestinationEmail.trim() ? customDestinationEmail.trim() : undefined;
@@ -530,7 +678,6 @@ export const SignInPage: React.FC<SignInPageProps> = ({
         ...mfaTargetUser,
         email: res.email,
         maskedEmail: res.maskedEmail,
-        demoOtp: res.demoOtp,
         emailDelivered: res.emailDelivered,
         emailError: res.emailError
       });
@@ -538,7 +685,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
       setResetSuccessMsg(
         res.emailDelivered
           ? `A fresh 6-digit code was sent to ${res.email || res.maskedEmail}.`
-          : `A fresh 6-digit code has been generated.`
+          : `A fresh 6-digit code has been generated for your Gmail.`
       );
     } else {
       setErrorMsg(res.error || 'Failed to resend verification code.');
@@ -694,30 +841,58 @@ export const SignInPage: React.FC<SignInPageProps> = ({
               </div>
             )}
 
-            {/* CASE 1: RESIDENT GMAIL 2FA VERIFICATION STEP */}
+            {/* Invisible Firebase reCAPTCHA container */}
+            <div id="recaptcha-container" className="hidden" aria-hidden="true" />
+
+            {/* CASE 1: RESIDENT FIREBASE SMS 2FA VERIFICATION (With Gmail Fallback) */}
             {mfaChallengeActive ? (
               <div className="space-y-4">
-                <div className="p-3.5 bg-blue-50/90 border border-blue-200 rounded-2xl text-xs space-y-2 text-slate-700">
-                  <div className="font-bold text-slate-900 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 font-extrabold text-blue-950">
-                      <Mail className="w-4 h-4 text-blue-600" />
-                      <span>Resident Security Verification</span>
-                    </span>
-                    <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-100/90 px-2 py-0.5 rounded-full">
-                      {mfaTargetUser?.emailDelivered ? 'Gmail Delivered' : 'Code Active'}
-                    </span>
+                {mfaMode === 'sms' ? (
+                  /* SUBCASE 1A: FIREBASE SMS MODE */
+                  <div className="p-3.5 bg-blue-50/90 border border-blue-200 rounded-2xl text-xs space-y-2 text-slate-700">
+                    <div className="font-bold text-slate-900 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 font-extrabold text-blue-950">
+                        <Phone className="w-4 h-4 text-blue-600" />
+                        <span>SMS Multi-Factor Authentication</span>
+                      </span>
+                      <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-100/90 px-2 py-0.5 rounded-full">
+                        Firebase SMS
+                      </span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-slate-600">
+                      A 6-digit verification code has been dispatched via Firebase to your registered mobile number:{' '}
+                      <strong className="text-slate-900 font-extrabold font-mono tracking-wide">
+                        {mfaTargetUser?.maskedPhone || mfaTargetUser?.phoneNumber || 'your mobile phone'}
+                      </strong>.
+                      Check your SMS text messages, then enter the code below to complete your resident sign-in.
+                    </p>
                   </div>
-                  <p className="text-[11px] leading-relaxed text-slate-600">
-                    A 6-digit verification code has been dispatched to your registered Gmail address:{' '}
-                    <strong className="text-slate-900 font-extrabold">{mfaTargetUser?.email || mfaTargetUser?.maskedEmail}</strong>.
-                    Open your Gmail inbox or spam folder, copy the code, and paste it below to enter your resident portal.
-                  </p>
-                </div>
+                ) : (
+                  /* SUBCASE 1B: GMAIL OTP FALLBACK MODE */
+                  <div className="p-3.5 bg-indigo-50/90 border border-indigo-200 rounded-2xl text-xs space-y-2 text-slate-700">
+                    <div className="font-bold text-slate-900 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 font-extrabold text-indigo-950">
+                        <Mail className="w-4 h-4 text-indigo-600" />
+                        <span>Gmail Multi-Factor Authentication (Fallback)</span>
+                      </span>
+                      <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-100/90 px-2 py-0.5 rounded-full">
+                        Email OTP
+                      </span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-slate-600">
+                      A 6-digit verification code has been dispatched to your registered Gmail address:{' '}
+                      <strong className="text-slate-900 font-extrabold">
+                        {mfaTargetUser?.email || mfaTargetUser?.maskedEmail}
+                      </strong>.
+                      Open your Gmail inbox or spam folder, copy the code, and paste it below.
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs font-bold text-slate-700 block">
-                      6-Digit Gmail Verification Code
+                      {mfaMode === 'sms' ? '6-Digit SMS Verification Code' : '6-Digit Gmail Verification Code'}
                     </label>
                     <button
                       type="button"
@@ -754,52 +929,81 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                     className="w-full px-4 py-3 bg-white/95 border border-slate-300 rounded-2xl text-center text-2xl font-mono font-black tracking-[0.3em] text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
                   />
                   <p className="text-[10px] text-slate-500 mt-1 text-center font-medium">
-                    Check your registered Gmail inbox for the 6-digit code
+                    {mfaMode === 'sms'
+                      ? 'Check your phone SMS text messages for the 6-digit code'
+                      : 'Check your registered Gmail inbox or spam folder'}
                   </p>
                 </div>
 
-                {/* Emergency code fallback shown only if email is in testing mode or failed live delivery */}
-                {!mfaTargetUser?.emailDelivered && mfaTargetUser?.demoOtp && (
-                  <div className="p-3 bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between text-xs text-slate-600">
-                    <div>
-                      <span className="font-semibold text-slate-800 text-[11px]">Emergency Security Code:</span>
-                      <span className="font-mono font-bold text-slate-900 ml-2 tracking-widest">{mfaTargetUser.demoOtp}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setMfaCode(mfaTargetUser.demoOtp || '')}
-                      className="text-[11px] font-bold text-blue-700 hover:text-blue-900 underline cursor-pointer"
-                    >
-                      Use Code
-                    </button>
-                  </div>
-                )}
-
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || smsSending}
                   className="w-full py-3 ios-btn-primary rounded-2xl text-xs font-bold cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {loading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{loading ? 'Verifying Code...' : 'Verify & Enter Portal'}</span>
+                  {(loading || smsSending) && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>
+                    {loading 
+                      ? 'Verifying Code...' 
+                      : smsSending 
+                      ? 'Dispatching SMS...' 
+                      : 'Verify & Enter Portal'}
+                  </span>
                 </button>
 
-                <div className="flex items-center justify-between text-xs pt-1">
-                  <button
-                    type="button"
-                    onClick={() => handleResendMfaCode()}
-                    disabled={loading}
-                    className="text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
-                  >
-                    Resend Code
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleResetChallenge}
-                    className="text-slate-500 hover:text-slate-700 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
+                {/* Resend and Dual-Channel Switching Options */}
+                <div className="space-y-2 pt-1 border-t border-slate-100">
+                  <div className="flex items-center justify-between text-xs">
+                    {mfaMode === 'sms' ? (
+                      <button
+                        type="button"
+                        onClick={handleResendSms}
+                        disabled={loading || smsSending || resendCooldown > 0}
+                        className="text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer disabled:text-slate-400 disabled:no-underline"
+                      >
+                        {resendCooldown > 0 ? `Resend SMS in ${resendCooldown}s` : 'Resend SMS Code'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleResendMfaCode}
+                        disabled={loading}
+                        className="text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer disabled:text-slate-400"
+                      >
+                        Resend Gmail Code
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleResetChallenge}
+                      className="text-slate-500 hover:text-slate-700 cursor-pointer"
+                    >
+                      Cancel & Return
+                    </button>
+                  </div>
+
+                  {/* Dual-Channel Fallback Button */}
+                  {mfaMode === 'sms' ? (
+                    <button
+                      type="button"
+                      onClick={handleSwitchToEmailFallback}
+                      disabled={loading}
+                      className="w-full py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Mail className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Didn't receive SMS? Send code to Gmail instead</span>
+                    </button>
+                  ) : mfaTargetUser?.phoneNumber ? (
+                    <button
+                      type="button"
+                      onClick={handleSwitchToSms}
+                      disabled={loading}
+                      className="w-full py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Phone className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Switch back to SMS verification</span>
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : isRegister ? (

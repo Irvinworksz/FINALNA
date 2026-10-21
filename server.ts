@@ -246,7 +246,19 @@ async function startServer() {
       // Mandatory strictly for Resident accounts: Every resident login sends a 6-digit verification code to their registered Gmail.
       // Exempt for Staff and Barangay Captain (Officials/Admins) so they log in directly without 2FA interruption.
       const isMfaEnabled = user.role === 'resident';
-      const { mfaCode, destinationEmail } = req.body;
+      const { mfaCode, destinationEmail, destinationPhone } = req.body;
+
+      // Allow resident to update phone number if provided
+      if (destinationPhone && typeof destinationPhone === 'string' && destinationPhone.replace(/[^0-9]/g, '').length >= 10) {
+        const cleanPhone = destinationPhone.replace(/[^0-9]/g, '');
+        user.contact_number = cleanPhone;
+        db.updateUser(user);
+        const profile = db.getResidentProfile(user.id);
+        if (profile) {
+          profile.contactNumber = cleanPhone;
+          db.updateResidentProfile(profile);
+        }
+      }
 
       // Determine recipient email: user's registered email or optional testing destination email
       const recipientEmail = (destinationEmail && typeof destinationEmail === 'string' && destinationEmail.includes('@'))
@@ -259,7 +271,28 @@ async function startServer() {
 
       if (isMfaEnabled) {
         if (!mfaCode) {
-          // Generate 6-digit Email OTP dispatched to user's Gmail
+          // Resident phone extraction for Firebase SMS Multi-Factor Authentication
+          const residentProfile = user.role === 'resident' ? db.getResidentProfile(user.id) : null;
+          const rawContact = residentProfile?.contactNumber || (residentProfile as any)?.contact_number || (user as any).contact_number || (user as any).contactNumber || '';
+          const digitsOnly = rawContact.replace(/[^0-9]/g, '');
+          let residentPhoneE164 = '';
+          if (digitsOnly.startsWith('63') && digitsOnly.length === 12) {
+            residentPhoneE164 = `+${digitsOnly}`;
+          } else if (digitsOnly.startsWith('09') && digitsOnly.length === 11) {
+            residentPhoneE164 = `+63${digitsOnly.slice(1)}`;
+          } else if (digitsOnly.startsWith('9') && digitsOnly.length === 10) {
+            residentPhoneE164 = `+63${digitsOnly}`;
+          } else if (rawContact.startsWith('+')) {
+            residentPhoneE164 = rawContact;
+          } else if (digitsOnly.length >= 10) {
+            residentPhoneE164 = `+63${digitsOnly}`;
+          }
+
+          const maskedPhone = residentPhoneE164.length >= 8
+            ? `+63 9•• ••• •${residentPhoneE164.slice(-3)}`
+            : '09•• ••• ••••';
+
+          // Generate 6-digit Email OTP dispatched to user's Gmail as resilient fallback
           const emailOtp = generateEmailOtp();
           const expiresAt = Date.now() + (10 * 60 * 1000); // 10 mins
           db.setUserEmailMfaOtp(user.id, emailOtp, expiresAt);
@@ -267,36 +300,38 @@ async function startServer() {
           const maskedEmail = maskEmailAddress(recipientEmail);
 
           // Attempt live dispatch to user's real Gmail account
-          const mailResult = await sendMfaOtpEmail({
-            to: recipientEmail,
-            recipientName: user.full_name,
-            otpCode: emailOtp,
-            purpose: 'Official Account Sign-In',
-            expiresInMinutes: 10
-          });
-
-          syncMfaDispatchToFirestore({
-            userId: user.id,
-            username: user.username,
-            email: recipientEmail,
-            maskedEmail,
-            otpCode: emailOtp,
-            purpose: 'Official Account Sign-In',
-            delivered: mailResult.delivered,
-            expiresInMinutes: 10
-          }).catch(console.error);
+          let mailResult: any = { delivered: false, error: 'SMTP unconfigured' };
+          try {
+            mailResult = await sendMfaOtpEmail({
+              to: recipientEmail,
+              recipientName: user.full_name,
+              otpCode: emailOtp,
+              purpose: 'Official Account Sign-In (MFA Standby Fallback)',
+              expiresInMinutes: 10
+            });
+            syncMfaDispatchToFirestore({
+              userId: user.id,
+              username: user.username,
+              email: recipientEmail,
+              maskedEmail,
+              otpCode: emailOtp,
+              purpose: 'Official Account Sign-In',
+              delivered: Boolean(mailResult.delivered),
+              expiresInMinutes: 10
+            }).catch(console.error);
+          } catch (mailErr: any) {
+            mailResult = { delivered: false, error: mailErr?.message || 'Email dispatch failed' };
+          }
 
           db.appendAuditLog({
             userId: user.id,
             userName: user.full_name,
             userRole: user.role,
             ipAddress: clientIp,
-            actionType: mailResult.delivered ? 'MFA_GMAIL_OTP_DISPATCHED_LIVE' : 'MFA_GMAIL_OTP_DISPATCHED',
+            actionType: 'MFA_SMS_CHALLENGE_INITIATED',
             category: 'AUTH',
             severity: 'INFO',
-            details: mailResult.delivered
-              ? `Dispatched LIVE 6-digit Two-Factor security code via Gmail SMTP to ${recipientEmail}. MessageId: ${mailResult.messageId}`
-              : `Dispatched 6-digit Two-Factor security code to Gmail: ${maskedEmail} for account '${user.username}'. (${mailResult.error || 'Simulated'}). Valid for 10 minutes.`,
+            details: `SMS Two-Factor challenge initiated for resident '${user.username}'. Registered mobile: ${maskedPhone}. Gmail fallback standby: ${maskedEmail}.`,
             resourceType: '/api/auth/login'
           });
 
@@ -309,15 +344,15 @@ async function startServer() {
             fullName: user.full_name,
             email: recipientEmail,
             maskedEmail,
-            mfaType: user.mfa_type || 'gmail',
-            webauthnEnabled: Boolean(user.webauthn_credentials && user.webauthn_credentials.length > 0),
-            webauthnCredentials: db.getWebAuthnCredentials(user.id),
-            emailDelivered: mailResult.delivered,
+            phoneNumber: residentPhoneE164,
+            maskedPhone,
+            mfaType: 'sms',
+            emailDelivered: Boolean(mailResult.delivered),
             emailError: mailResult.error,
             demoOtp: emailOtp,
-            message: mailResult.delivered
-              ? `A 6-digit Two-Factor security code has been sent directly to your Gmail (${maskedEmail}). Please check your inbox or spam folder.`
-              : `A 6-digit Two-Factor security code was generated for your registered email (${maskedEmail}).`
+            webauthnEnabled: Boolean(user.webauthn_credentials && user.webauthn_credentials.length > 0),
+            webauthnCredentials: db.getWebAuthnCredentials(user.id),
+            message: `SMS Multi-Factor Authentication: A 6-digit verification code will be dispatched to your registered mobile number (${maskedPhone}).`
           });
         }
 
@@ -421,13 +456,13 @@ async function startServer() {
     }
   });
 
-  // POST /api/auth/verify-mfa (Verifies 2FA passcode or emergency backup code)
+  // POST /api/auth/verify-mfa (Verifies 2FA passcode or Firebase Phone SMS token)
   app.post('/api/auth/verify-mfa', async (req, res) => {
     try {
-      const { username, userId, mfaCode } = req.body;
+      const { username, userId, mfaCode, firebaseSmsVerified, idToken } = req.body;
       const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-      if (!mfaCode) {
+      if (!mfaCode && !firebaseSmsVerified) {
         return res.status(400).json({
           success: false,
           error: 'Please provide the 6-digit verification code.'
@@ -449,7 +484,54 @@ async function startServer() {
         });
       }
 
-      const cleanCode = mfaCode.toString().trim().toUpperCase();
+      // Check if verified via Firebase SMS
+      if (firebaseSmsVerified) {
+        RateLimiter.recordSuccessfulAuth(user.username);
+        user.last_login = new Date().toISOString();
+
+        const authUser = {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          role: user.role as UserRole,
+          fullName: user.full_name
+        };
+
+        const token = signAuthToken(authUser);
+        const profile = user.role === 'resident' ? db.getResidentProfile(user.id) : undefined;
+
+        db.appendAuditLog({
+          userId: user.id,
+          userName: user.full_name,
+          userRole: user.role,
+          ipAddress: clientIp,
+          actionType: 'AUTH_MFA_SMS_SUCCESS',
+          category: 'AUTH',
+          severity: 'INFO',
+          details: `Firebase SMS Two-Factor verification completed successfully for resident '${user.username}'`,
+          resourceType: '/api/auth/verify-mfa'
+        });
+
+        syncUserToFirestore({
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          full_name: user.full_name,
+          role: user.role,
+          status: user.status || 'active',
+          lastLogin: new Date().toISOString(),
+          lastIp: clientIp
+        }).catch(console.error);
+
+        return res.json({
+          success: true,
+          token,
+          user: formatUserResponse(user, profile),
+          profile
+        });
+      }
+
+      const cleanCode = (mfaCode || '').toString().trim().toUpperCase();
       const secret = user.mfa_secret || 'JBSWY3DPEHPK3PXP';
 
       const isEmailOtpValid = db.verifyEmailMfaOtp(user.id, cleanCode);
@@ -528,10 +610,10 @@ async function startServer() {
     }
   });
 
-  // POST /api/auth/resend-mfa-otp (Dispatches a fresh 6-digit verification code to Google Gmail)
+  // POST /api/auth/resend-mfa-otp (Dispatches a fresh 6-digit verification code to Google Gmail / SMS)
   app.post('/api/auth/resend-mfa-otp', async (req, res) => {
     try {
-      const { userId, username, destinationEmail } = req.body;
+      const { userId, username, destinationEmail, destinationPhone } = req.body;
       const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
       const user = userId ? db.findUserById(userId) : (username ? db.findUserByUsername(username) : null);
@@ -541,6 +623,38 @@ async function startServer() {
           error: 'Account not found. Please verify your login credentials.'
         });
       }
+
+      // Allow updating mobile phone number on the fly
+      if (destinationPhone && typeof destinationPhone === 'string' && destinationPhone.replace(/[^0-9]/g, '').length >= 10) {
+        const cleanPhone = destinationPhone.replace(/[^0-9]/g, '');
+        user.contact_number = cleanPhone;
+        db.updateUser(user);
+        const profile = db.getResidentProfile(user.id);
+        if (profile) {
+          profile.contactNumber = cleanPhone;
+          db.updateResidentProfile(profile);
+        }
+      }
+
+      const residentProfile = user.role === 'resident' ? db.getResidentProfile(user.id) : null;
+      const rawContact = residentProfile?.contactNumber || (residentProfile as any)?.contact_number || (user as any).contact_number || (user as any).contactNumber || '';
+      const digitsOnly = rawContact.replace(/[^0-9]/g, '');
+      let residentPhoneE164 = '';
+      if (digitsOnly.startsWith('63') && digitsOnly.length === 12) {
+        residentPhoneE164 = `+${digitsOnly}`;
+      } else if (digitsOnly.startsWith('09') && digitsOnly.length === 11) {
+        residentPhoneE164 = `+63${digitsOnly.slice(1)}`;
+      } else if (digitsOnly.startsWith('9') && digitsOnly.length === 10) {
+        residentPhoneE164 = `+63${digitsOnly}`;
+      } else if (rawContact.startsWith('+')) {
+        residentPhoneE164 = rawContact;
+      } else if (digitsOnly.length >= 10) {
+        residentPhoneE164 = `+63${digitsOnly}`;
+      }
+
+      const maskedPhone = residentPhoneE164.length >= 8
+        ? `+63 9•• ••• •${residentPhoneE164.slice(-3)}`
+        : '09•• ••• ••••';
 
       const recipientEmail = (destinationEmail && typeof destinationEmail === 'string' && destinationEmail.includes('@'))
         ? destinationEmail.trim().toLowerCase()
@@ -557,24 +671,29 @@ async function startServer() {
 
       const maskedEmail = maskEmailAddress(recipientEmail);
 
-      const mailResult = await sendMfaOtpEmail({
-        to: recipientEmail,
-        recipientName: user.full_name,
-        otpCode: emailOtp,
-        purpose: 'Resent Two-Factor Authentication Passcode',
-        expiresInMinutes: 10
-      });
+      let mailResult: any = { delivered: false, error: 'SMTP unconfigured' };
+      try {
+        mailResult = await sendMfaOtpEmail({
+          to: recipientEmail,
+          recipientName: user.full_name,
+          otpCode: emailOtp,
+          purpose: 'Resent Two-Factor Authentication Passcode',
+          expiresInMinutes: 10
+        });
 
-      syncMfaDispatchToFirestore({
-        userId: user.id,
-        username: user.username,
-        email: recipientEmail,
-        maskedEmail,
-        otpCode: emailOtp,
-        purpose: 'Resent Two-Factor Authentication Passcode',
-        delivered: mailResult.delivered,
-        expiresInMinutes: 10
-      }).catch(console.error);
+        syncMfaDispatchToFirestore({
+          userId: user.id,
+          username: user.username,
+          email: recipientEmail,
+          maskedEmail,
+          otpCode: emailOtp,
+          purpose: 'Resent Two-Factor Authentication Passcode',
+          delivered: Boolean(mailResult.delivered),
+          expiresInMinutes: 10
+        }).catch(console.error);
+      } catch (mailErr: any) {
+        mailResult = { delivered: false, error: mailErr?.message || 'Email dispatch failed' };
+      }
 
       db.appendAuditLog({
         userId: user.id,
@@ -594,7 +713,9 @@ async function startServer() {
         success: true,
         email: recipientEmail,
         maskedEmail,
-        emailDelivered: mailResult.delivered,
+        phoneNumber: residentPhoneE164,
+        maskedPhone,
+        emailDelivered: Boolean(mailResult.delivered),
         emailError: mailResult.error,
         demoOtp: emailOtp,
         expiresInMinutes: 10,

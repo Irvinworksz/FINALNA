@@ -89,7 +89,7 @@ export const apiClient = {
   },
 
   // Auth
-  async login(username: string, password: string, mfaCode?: string, destinationEmail?: string) {
+  async login(username: string, password: string, mfaCode?: string, destinationEmail?: string, destinationPhone?: string) {
     const res = await makeRequest<{
       user?: User;
       token?: string;
@@ -101,7 +101,9 @@ export const apiClient = {
       fullName?: string;
       email?: string;
       maskedEmail?: string;
-      mfaType?: 'gmail' | 'totp' | 'both';
+      phoneNumber?: string;
+      maskedPhone?: string;
+      mfaType?: 'sms' | 'gmail' | 'totp' | 'both';
       emailDelivered?: boolean;
       emailError?: string;
       demoOtp?: string;
@@ -111,7 +113,7 @@ export const apiClient = {
       passwordResetPending?: boolean;
     }>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password, mfaCode, destinationEmail })
+      body: JSON.stringify({ username, password, mfaCode, destinationEmail, destinationPhone })
     });
 
     if (res.success && res.token && res.user) {
@@ -148,6 +150,8 @@ export const apiClient = {
       fullName?: string;
       email?: string;
       maskedEmail?: string;
+      phoneNumber?: string;
+      maskedPhone?: string;
       emailDelivered?: boolean;
       emailError?: string;
       demoOtp?: string;
@@ -164,7 +168,13 @@ export const apiClient = {
     return res;
   },
 
-  async verifyMfa(data: { username?: string; userId?: string; mfaCode: string }) {
+  async verifyMfa(data: {
+    username?: string;
+    userId?: string;
+    mfaCode?: string;
+    firebaseSmsVerified?: boolean;
+    idToken?: string;
+  }) {
     const res = await makeRequest<{ user: User; token: string; profile?: ResidentProfile }>('/api/auth/verify-mfa', {
       method: 'POST',
       body: JSON.stringify(data)
@@ -192,10 +202,12 @@ export const apiClient = {
     return res;
   },
 
-  async resendMfaOtp(data: { userId?: string; username?: string; destinationEmail?: string }) {
+  async resendMfaOtp(data: { userId?: string; username?: string; destinationEmail?: string; destinationPhone?: string }) {
     return makeRequest<{
       email: string;
       maskedEmail: string;
+      phoneNumber?: string;
+      maskedPhone?: string;
       emailDelivered?: boolean;
       emailError?: string;
       demoOtp?: string;

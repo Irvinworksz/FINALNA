@@ -27,6 +27,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   const [firebaseDispatched, setFirebaseDispatched] = useState<boolean>(false);
   const [firebaseError, setFirebaseError] = useState<string | undefined>();
   const [emailError, setEmailError] = useState<string | undefined>();
+  const [demoOtp, setDemoOtp] = useState<string>('');
   const [otpCode, setOtpCode] = useState<string>('');
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
@@ -64,6 +65,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     setFirebaseDispatched(false);
     setFirebaseError(undefined);
     setEmailError(undefined);
+    setDemoOtp('');
     setOtpCode('');
     setNewPassword('');
     setConfirmPassword('');
@@ -115,16 +117,17 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
       setFirebaseDispatched(fbSent);
       setFirebaseError(fbErr);
       setEmailError(res.emailError);
+      setDemoOtp(res.demoOtp || '');
       setOtpCode('');
       setStep('verify');
       setViewMode(fbSent ? 'link_instructions' : 'enter_code');
       setResendCooldown(30);
 
       const successNotice = fbSent
-        ? `Official reset link sent to ${targetEmail}! Please follow the link in your Gmail to reset your password.`
+        ? `Official reset link dispatched to ${targetEmail}! Follow the link in your Gmail (check Spam if not in Primary).`
         : res.emailDelivered
         ? `A 6-digit security reset code has been sent directly to your Gmail inbox (${res.email || res.maskedEmail}).`
-        : `A 6-digit security reset code has been sent to ${res.email || res.maskedEmail || targetEmail}.`;
+        : `A 6-digit security reset code has been generated for ${res.email || res.maskedEmail || targetEmail}.`;
 
       setInfoMsg(successNotice);
     } else {
@@ -449,7 +452,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
           {step === 'verify' && viewMode === 'enter_code' && (
             <form onSubmit={handleVerifyAndReset} className="space-y-4 animate-in fade-in">
               
-              {/* Delivery Target Banner without autofill */}
+              {/* Delivery Target Banner */}
               <div className="p-3.5 rounded-2xl text-xs space-y-1 border bg-blue-50 border-blue-200 text-blue-950">
                 <div className="flex items-center justify-between">
                   <span className="font-bold flex items-center gap-1.5">
@@ -464,9 +467,26 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   {recipientEmail || maskedEmail}
                 </div>
                 <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Enter the 6-digit verification code sent to your registered Gmail and set your new password.
+                  Enter the 6-digit verification code sent to your registered Gmail and set your new password. Check your Spam or Promotions folder if not in Primary.
                 </p>
               </div>
+
+              {/* Instant Auto-Fill for Development / Unconfigured Gateway */}
+              {demoOtp && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between text-xs">
+                  <div className="space-y-0.5">
+                    <span className="font-bold text-amber-900 block text-[11px]">Active Verification Code</span>
+                    <span className="font-mono font-black text-amber-950 tracking-wider text-sm">{demoOtp}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOtpCode(demoOtp)}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs cursor-pointer shadow-xs transition-colors"
+                  >
+                    Auto-Fill Code
+                  </button>
+                </div>
+              )}
 
               {/* 6-Digit Passcode Input Field */}
               <div>
