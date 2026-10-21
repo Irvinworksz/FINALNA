@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Connection health check document
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    // Function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Users collection: allow read and write for accounts synchronization
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Profiles collection: full parity for resident personal census & valid ID details
+    match /profiles/{profileId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Multi-factor authentication dispatches and security events
+    match /mfaDispatches/{dispatchId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Clearance Requests: residents, staff, and captain workflows
+    match /clearanceRequests/{requestId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Audit Logs: Append-only, strictly immutable
+    match /auditLogs/{auditId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // Notifications inbox
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // System settings & SMTP configurations
+    match /systemSettings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
