@@ -792,7 +792,7 @@ async function startServer() {
 
       const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-      // Mandatory validation: First name, Last name, Username, Password
+      // Mandatory validation: First name, Last name, Username, Password, Birthdate, Contact Number, Address, ID
       if (!username || !password || !firstName || !lastName) {
         return res.status(400).json({
           success: false,
@@ -800,12 +800,50 @@ async function startServer() {
         });
       }
 
-      // First name, last name, and middle name cannot contain digits
-      const hasDigitInNames = /[0-9]/.test(firstName) || /[0-9]/.test(lastName) || (middleName && /[0-9]/.test(middleName));
-      if (hasDigitInNames) {
+      // First name and last name must strictly contain only alphabetical letters and spaces (no numbers or special characters)
+      if (!/^[a-zA-Z\s]+$/.test(firstName.trim())) {
         return res.status(400).json({
           success: false,
-          error: 'First name, middle name, and last name must contain alphabetical characters only.'
+          error: 'First name must contain alphabetical letters only. Numbers and special characters are not allowed.'
+        });
+      }
+
+      if (!/^[a-zA-Z\s]+$/.test(lastName.trim())) {
+        return res.status(400).json({
+          success: false,
+          error: 'Last name must contain alphabetical letters only. Numbers and special characters are not allowed.'
+        });
+      }
+
+      // Middle name is optional, but if provided, must contain alphabetical characters and spaces only
+      if (middleName && middleName.trim() && !/^[a-zA-Z\s]+$/.test(middleName.trim())) {
+        return res.status(400).json({
+          success: false,
+          error: 'Middle name must contain alphabetical letters only. Numbers and special characters are not allowed.'
+        });
+      }
+
+      // Date of birth is required
+      if (!birthDate || !birthDate.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Date of birth is required.'
+        });
+      }
+
+      // Purok and Address are required
+      if (!purokZone || !purokZone.trim() || !streetAddress || !streetAddress.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Purok / Zone and Street Address are required.'
+        });
+      }
+
+      // ID details are required
+      if (!idType || !idType.trim() || !idNumber || !idNumber.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Government ID Type and ID Number are required.'
         });
       }
 
@@ -3038,6 +3076,8 @@ async function startServer() {
         residentId: residentUser.id,
         residentName: residentUser.full_name,
         residentAddress: residentUser.address,
+        residentBirthDate: residentUser.birth_date || residentProfile?.birthDate || '1995-06-15',
+        residentCivilStatus: residentUser.civil_status || residentProfile?.civilStatus || 'Single',
         purok: residentUser.purok,
         documentType: cleanDocType,
         purpose: cleanPurpose,

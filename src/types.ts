@@ -161,6 +161,8 @@ export interface ClearanceRequest {
   status: RequestStatus;
   
   // Specific details
+  residentBirthDate?: string;
+  residentCivilStatus?: string;
   businessName?: string;
   businessNature?: string;
   businessAddress?: string;

@@ -1,140 +1,151 @@
 /**
- * Standard simulated Philippine Government & Barangay ID Card Templates
- * Generates crisp SVG Data URLs for ID attachment and residency verification
+ * Realistic Philippine Government-Issued ID SVG Generator
+ * Generates sample ID cards as SVG data URLs for resident verification testing
  */
 
-export interface SampleIdOption {
-  idType: string;
-  idNumber: string;
-  fileName: string;
-  dataUrl: string;
-  description: string;
-}
+export function generateSampleIdDataUrl(
+  idType: string,
+  fullName: string,
+  idNumber: string,
+  purok: string = 'Purok 1'
+): string {
+  const safeFullName = (fullName || 'JUAN DELA CRUZ').toUpperCase().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeIdNumber = (idNumber || 'PSA-2026-0001').toUpperCase().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safePurok = (purok || 'Purok 1').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeType = (idType || 'PHILIPPINE NATIONAL ID').toUpperCase().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export function generateSampleIdDataUrl(type: string, name: string, idNumber: string, purok: string = 'Purok 4'): string {
-  const cleanName = (name || 'MARIA C. SANTOS').toUpperCase();
-  const cleanId = (idNumber || 'PHIL-2026-8841-9920').toUpperCase();
-  const cleanPurok = purok || 'Purok 4';
-  
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 380" width="600" height="380">
-    <defs>
-      <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#0f2b48" />
-        <stop offset="40%" stop-color="#1e3a8a" />
-        <stop offset="100%" stop-color="#0b1e36" />
-      </linearGradient>
-      <linearGradient id="goldAccent" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%" stop-color="#f59e0b" />
-        <stop offset="50%" stop-color="#fbbf24" />
-        <stop offset="100%" stop-color="#d97706" />
-      </linearGradient>
-      <pattern id="guilloche" width="30" height="30" patternUnits="userSpaceOnUse">
-        <circle cx="15" cy="15" r="14" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1" />
-        <circle cx="15" cy="15" r="8" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="0.5" />
-      </pattern>
-    </defs>
+  // Pick color theme based on ID type
+  let primaryColor = '#1e3a8a'; // Blue for PhilSys / National ID
+  let secondaryColor = '#0284c7';
+  let badgeText = 'REPUBLIKA NG PILIPINAS';
 
-    <!-- Card Base with Rounded Corners -->
-    <rect x="0" y="0" width="600" height="380" rx="20" fill="url(#cardGrad)" />
-    <rect x="0" y="0" width="600" height="380" rx="20" fill="url(#guilloche)" />
-    <rect x="0" y="0" width="600" height="380" rx="20" fill="none" stroke="rgba(251,191,36,0.3)" stroke-width="2" />
-
-    <!-- Card Header Top Bar -->
-    <rect x="0" y="0" width="600" height="74" rx="20" fill="rgba(15, 23, 42, 0.6)" />
-    <rect x="0" y="70" width="600" height="4" fill="url(#goldAccent)" />
-
-    <!-- Emblem / Coat of Arms Symbol -->
-    <circle cx="48" cy="37" r="24" fill="#1e3a8a" stroke="#fbbf24" stroke-width="1.5" />
-    <circle cx="48" cy="37" r="18" fill="none" stroke="#fbbf24" stroke-dasharray="3,2" />
-    <text x="48" y="42" font-family="sans-serif" font-size="14" font-weight="900" fill="#fbbf24" text-anchor="middle">PH</text>
-
-    <!-- Official Header Titles -->
-    <text x="86" y="28" font-family="sans-serif" font-size="11" font-weight="800" letter-spacing="1.5" fill="#93c5fd">REPUBLIKA NG PILIPINAS</text>
-    <text x="86" y="46" font-family="sans-serif" font-size="14" font-weight="900" letter-spacing="1" fill="#ffffff">${type.toUpperCase()}</text>
-    <text x="86" y="60" font-family="sans-serif" font-size="9" font-weight="700" letter-spacing="0.5" fill="#cbd5e1">OFFICIAL IDENTIFICATION &amp; RESIDENCY CREDENTIAL</text>
-
-    <!-- Photo Box -->
-    <rect x="36" y="96" width="130" height="160" rx="10" fill="#0f172a" stroke="#93c5fd" stroke-width="2" />
-    <!-- Stylized Avatar Silhouette inside Photo Box -->
-    <circle cx="101" cy="155" r="32" fill="#334155" />
-    <path d="M 56 240 Q 101 190 146 240 Z" fill="#334155" />
-    <rect x="36" y="236" width="130" height="20" fill="rgba(30,58,138,0.8)" rx="4" />
-    <text x="101" y="250" font-family="sans-serif" font-size="9" font-weight="800" fill="#fbbf24" text-anchor="middle">VERIFIED PHOTO</text>
-
-    <!-- Watermark / Microprint Line -->
-    <line x1="184" y1="96" x2="560" y2="96" stroke="rgba(255,255,255,0.15)" stroke-width="1" />
-
-    <!-- Resident Information Block -->
-    <!-- Full Name -->
-    <text x="184" y="116" font-family="sans-serif" font-size="9" font-weight="700" fill="#94a3b8">APELYIDO, MGA PANGALAN / FULL NAME</text>
-    <text x="184" y="136" font-family="sans-serif" font-size="16" font-weight="900" letter-spacing="0.5" fill="#ffffff">${cleanName}</text>
-
-    <!-- ID Card Serial Number -->
-    <text x="184" y="162" font-family="sans-serif" font-size="9" font-weight="700" fill="#94a3b8">CARD NUMBER / SERIAL</text>
-    <text x="184" y="180" font-family="monospace" font-size="14" font-weight="800" letter-spacing="2" fill="#fbbf24">${cleanId}</text>
-
-    <!-- Address / Jurisdiction -->
-    <text x="184" y="206" font-family="sans-serif" font-size="9" font-weight="700" fill="#94a3b8">RESIDENTIAL ADDRESS / JURISDICTION</text>
-    <text x="184" y="224" font-family="sans-serif" font-size="12" font-weight="800" fill="#e2e8f0">${cleanPurok}, Barangay Cabucbucan, Rizal, N.E.</text>
-
-    <!-- Card Metadata Grid: Date Issued & Civil Status -->
-    <g transform="translate(184, 240)">
-      <text x="0" y="12" font-family="sans-serif" font-size="8" font-weight="700" fill="#94a3b8">DATE OF ISSUE</text>
-      <text x="0" y="26" font-family="sans-serif" font-size="11" font-weight="800" fill="#ffffff">15 AUG 2024</text>
-
-      <text x="110" y="12" font-family="sans-serif" font-size="8" font-weight="700" fill="#94a3b8">CITIZENSHIP</text>
-      <text x="110" y="26" font-family="sans-serif" font-size="11" font-weight="800" fill="#ffffff">FILIPINO</text>
-
-      <text x="210" y="12" font-family="sans-serif" font-size="8" font-weight="700" fill="#94a3b8">EXPIRY</text>
-      <text x="210" y="26" font-family="sans-serif" font-size="11" font-weight="800" fill="#fbbf24">PERMANENT</text>
-    </g>
-
-    <!-- Microchip / Security Hologram Chip -->
-    <rect x="490" y="112" width="70" height="54" rx="6" fill="#eab308" stroke="#ca8a04" stroke-width="1.5" />
-    <path d="M 490 139 L 560 139 M 525 112 L 525 166" stroke="#ca8a04" stroke-width="1" />
-    <circle cx="525" cy="139" r="8" fill="#ca8a04" />
-    <text x="525" y="142" font-family="sans-serif" font-size="7" font-weight="900" fill="#fef08a" text-anchor="middle">SEC</text>
-
-    <!-- Signature Line & Decorative Security Guilloche -->
-    <path d="M 40 310 Q 70 295 100 315 T 160 305" fill="none" stroke="#60a5fa" stroke-width="1.5" />
-    <text x="40" y="328" font-family="sans-serif" font-size="8" font-weight="700" fill="#94a3b8">SIGNATURE OF BEARER</text>
-
-    <!-- Machine Readable Zone (MRZ) Bottom Footer -->
-    <rect x="0" y="340" width="600" height="40" rx="0" fill="#080e1a" />
-    <text x="36" y="358" font-family="monospace" font-size="11" font-weight="700" fill="#64748b" letter-spacing="3">IDPHL${cleanId.replace(/[^A-Z0-9]/g, '')}&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;</text>
-    <text x="36" y="372" font-family="monospace" font-size="11" font-weight="700" fill="#64748b" letter-spacing="3">${cleanName.replace(/[^A-Z]/g, '')}&lt;&lt;&lt;&lt;&lt;&lt;9506154M3008157PHL</text>
-  </svg>`;
-
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
-export const SAMPLE_ID_TEMPLATES: SampleIdOption[] = [
-  {
-    idType: 'Philippine National ID (PhilSys)',
-    idNumber: 'PHIL-2026-8841-9920',
-    fileName: 'philsys_national_id_sample.svg',
-    dataUrl: generateSampleIdDataUrl('Philippine National ID (PhilSys)', 'Maria C. Santos', 'PHIL-2026-8841-9920', 'Purok 4'),
-    description: 'Republic of the Philippines PhilSys Card with security chip and photo'
-  },
-  {
-    idType: "Driver's License (LTO)",
-    idNumber: 'DL-N02-24-998812',
-    fileName: 'lto_drivers_license_sample.svg',
-    dataUrl: generateSampleIdDataUrl("Driver's License (LTO)", 'Maria Clara Santos', 'DL-N02-24-998812', 'Purok 2'),
-    description: 'Land Transportation Office Professional / Non-Professional License'
-  },
-  {
-    idType: "Voter's ID / Comelec Certificate",
-    idNumber: 'VR-2025-03-4921A',
-    fileName: 'comelec_voters_id_sample.svg',
-    dataUrl: generateSampleIdDataUrl("Voter's ID / Comelec Certificate", 'Ricardo M. Dalisay', 'VR-2025-03-4921A', 'Purok 3'),
-    description: 'Commission on Elections Official Voter Identification'
-  },
-  {
-    idType: 'Barangay Resident ID',
-    idNumber: 'BRGY-CAB-2026-0418',
-    fileName: 'barangay_resident_id_sample.svg',
-    dataUrl: generateSampleIdDataUrl('Barangay Resident ID', 'Elena Ramos', 'BRGY-CAB-2026-0418', 'Purok 1'),
-    description: 'Official Barangay Cabucbucan Resident ID with jurisdiction certification'
+  if (safeType.includes('DRIVER')) {
+    primaryColor = '#15803d'; // Green for LTO
+    secondaryColor = '#059669';
+    badgeText = 'LAND TRANSPORTATION OFFICE';
+  } else if (safeType.includes('VOTER')) {
+    primaryColor = '#b91c1c'; // Red for COMELEC
+    secondaryColor = '#e11d48';
+    badgeText = 'COMMISSION ON ELECTIONS';
+  } else if (safeType.includes('BARANGAY')) {
+    primaryColor = '#0f766e'; // Teal for Barangay
+    secondaryColor = '#0d9488';
+    badgeText = 'BARANGAY CABUCBUCAN CIVIL REGISTRY';
+  } else if (safeType.includes('UMID') || safeType.includes('SSS')) {
+    primaryColor = '#4338ca'; // Indigo for UMID
+    secondaryColor = '#6366f1';
+    badgeText = 'UNIFIED MULTI-PURPOSE ID';
   }
-];
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 380" width="600" height="380">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="60%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="bannerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="${primaryColor}"/>
+      <stop offset="100%" stop-color="${secondaryColor}"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- Card Body -->
+  <rect x="10" y="10" width="580" height="360" rx="16" fill="url(#bgGrad)" stroke="#cbd5e1" stroke-width="2" filter="url(#shadow)"/>
+
+  <!-- Top Header Banner -->
+  <path d="M 10 26 Q 10 10 26 10 L 574 10 Q 590 10 590 26 L 590 70 L 10 70 Z" fill="url(#bannerGrad)"/>
+
+  <text x="300" y="32" fill="#fef08a" font-family="Arial, sans-serif" font-size="11" font-weight="bold" text-anchor="middle" letter-spacing="2">
+    ${badgeText}
+  </text>
+  <text x="300" y="52" fill="#ffffff" font-family="Arial, sans-serif" font-size="15" font-weight="800" text-anchor="middle" letter-spacing="1">
+    ${safeType}
+  </text>
+
+  <!-- Watermark Seal Pattern -->
+  <circle cx="480" cy="200" r="75" fill="none" stroke="${primaryColor}" stroke-opacity="0.08" stroke-width="6"/>
+  <circle cx="480" cy="200" r="50" fill="none" stroke="${primaryColor}" stroke-opacity="0.06" stroke-width="3"/>
+
+  <!-- Photo Box -->
+  <rect x="35" y="90" width="130" height="160" rx="8" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
+  <!-- Avatar Silhouette -->
+  <circle cx="100" cy="140" r="32" fill="#94a3b8"/>
+  <path d="M 55 240 Q 100 185 145 240 Z" fill="#94a3b8"/>
+  <rect x="35" y="222" width="130" height="28" fill="${primaryColor}" fill-opacity="0.9" rx="0 0 6 6"/>
+  <text x="100" y="240" fill="#ffffff" font-family="Arial, sans-serif" font-size="10" font-weight="bold" text-anchor="middle">VERIFIED</text>
+
+  <!-- ID Details -->
+  <g transform="translate(185, 95)" font-family="Arial, sans-serif">
+    <!-- ID Number -->
+    <text x="0" y="15" fill="#64748b" font-size="9" font-weight="bold" letter-spacing="1">IDENTIFICATION NUMBER / CRN</text>
+    <text x="0" y="38" fill="#0f172a" font-size="17" font-weight="800" font-family="monospace" letter-spacing="2">${safeIdNumber}</text>
+
+    <!-- Full Name -->
+    <text x="0" y="65" fill="#64748b" font-size="9" font-weight="bold" letter-spacing="1">FULL LEGAL NAME</text>
+    <text x="0" y="88" fill="#0f172a" font-size="16" font-weight="800">${safeFullName}</text>
+
+    <!-- Address / Purok -->
+    <text x="0" y="115" fill="#64748b" font-size="9" font-weight="bold" letter-spacing="1">JURISDICTION / RESIDENCE</text>
+    <text x="0" y="132" fill="#334155" font-size="12" font-weight="600">${safePurok}, Cabucbucan, Rizal, N.E.</text>
+
+    <!-- Issue & Expiry -->
+    <text x="0" y="158" fill="#64748b" font-size="9" font-weight="bold" letter-spacing="1">STATUS</text>
+    <text x="0" y="174" fill="#15803d" font-size="11" font-weight="700">● ACTIVE &amp; OFFICIAL RECORD</text>
+  </g>
+
+  <!-- Bottom Barcode & Security Hologram Strip -->
+  <rect x="25" y="275" width="550" height="2" fill="#e2e8f0"/>
+  
+  <!-- Simulated Micro-Barcode -->
+  <g transform="translate(35, 290)">
+    <rect x="0" y="0" width="3" height="45" fill="#1e293b"/>
+    <rect x="5" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="9" y="0" width="5" height="45" fill="#1e293b"/>
+    <rect x="17" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="22" y="0" width="4" height="45" fill="#1e293b"/>
+    <rect x="28" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="33" y="0" width="6" height="45" fill="#1e293b"/>
+    <rect x="42" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="47" y="0" width="4" height="45" fill="#1e293b"/>
+    <rect x="54" y="0" width="3" height="45" fill="#1e293b"/>
+    <rect x="60" y="0" width="6" height="45" fill="#1e293b"/>
+    <rect x="69" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="74" y="0" width="5" height="45" fill="#1e293b"/>
+    <rect x="82" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="87" y="0" width="4" height="45" fill="#1e293b"/>
+    <rect x="94" y="0" width="5" height="45" fill="#1e293b"/>
+    <rect x="102" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="107" y="0" width="6" height="45" fill="#1e293b"/>
+    <rect x="116" y="0" width="3" height="45" fill="#1e293b"/>
+    <rect x="122" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="127" y="0" width="5" height="45" fill="#1e293b"/>
+    <rect x="135" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="140" y="0" width="4" height="45" fill="#1e293b"/>
+    <rect x="147" y="0" width="6" height="45" fill="#1e293b"/>
+    <rect x="156" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="161" y="0" width="5" height="45" fill="#1e293b"/>
+    <rect x="169" y="0" width="3" height="45" fill="#1e293b"/>
+    <rect x="175" y="0" width="4" height="45" fill="#1e293b"/>
+    <rect x="182" y="0" width="2" height="45" fill="#1e293b"/>
+    <rect x="187" y="0" width="6" height="45" fill="#1e293b"/>
+  </g>
+
+  <!-- Holographic Seal Badge -->
+  <g transform="translate(470, 285)">
+    <circle cx="45" cy="30" r="26" fill="url(#bannerGrad)" opacity="0.9"/>
+    <circle cx="45" cy="30" r="23" fill="none" stroke="#fef08a" stroke-width="1.5" stroke-dasharray="3,2"/>
+    <text x="45" y="27" fill="#ffffff" font-family="Arial, sans-serif" font-size="8" font-weight="bold" text-anchor="middle">OFFICIAL</text>
+    <text x="45" y="38" fill="#fef08a" font-family="Arial, sans-serif" font-size="7" font-weight="bold" text-anchor="middle">SEAL</text>
+  </g>
+
+  <text x="245" y="325" fill="#94a3b8" font-family="Arial, sans-serif" font-size="9" font-style="italic">
+    Republic of the Philippines · E-Civil Registry &amp; Residency Verification
+  </text>
+</svg>`;
+
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}

@@ -22,6 +22,20 @@ export const OfficialSigningPortal: React.FC<OfficialSigningPortalProps> = ({
   const pendingSigning = requests.filter(r => r.status === 'for_signature');
   const alreadySigned = requests.filter(r => r.status === 'ready_for_collection' || r.status === 'issued');
 
+  const formatBirthDateWithAge = (dateStr?: string) => {
+    if (!dateStr) return 'Not Specified';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const formatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const ageDifMs = Date.now() - d.getTime();
+      const age = Math.floor(ageDifMs / (365.25 * 24 * 60 * 60 * 1000));
+      return `${formatted} (${age} yrs old)`;
+    } catch {
+      return dateStr;
+    }
+  };
+
   const handleSignDocument = async (req: ClearanceRequest) => {
     setSigningId(req.id);
     setSigningSuccess('');
@@ -120,6 +134,11 @@ export const OfficialSigningPortal: React.FC<OfficialSigningPortalProps> = ({
                         <h4 className="font-bold text-slate-900 text-base">{req.residentName}</h4>
                       </div>
                       <span className="text-xs text-slate-500 font-medium">{req.residentAddress} ({req.purok})</span>
+                      <div className="text-[11px] text-blue-800 font-mono mt-1 font-semibold flex items-center gap-2">
+                        <span>DOB: <strong className="text-slate-900">{formatBirthDateWithAge(req.residentBirthDate)}</strong></span>
+                        <span className="text-slate-300">•</span>
+                        <span>Civil Status: <strong className="text-slate-900">{req.residentCivilStatus || 'Single'}</strong></span>
+                      </div>
                     </div>
                   </div>
 
@@ -269,19 +288,23 @@ export const OfficialSigningPortal: React.FC<OfficialSigningPortalProps> = ({
                         <span className="text-[10px] text-slate-300 uppercase font-semibold">Applicant Name:</span>
                         <div className="font-bold text-white text-sm">{inspectingReq.residentName}</div>
                       </div>
-                      <div>
-                        <span className="text-[10px] text-slate-300 uppercase font-semibold">Address:</span>
-                        <div className="text-slate-100">{inspectingReq.residentAddress}</div>
-                      </div>
                       <div className="grid grid-cols-2 gap-2 text-[11px]">
                         <div>
-                          <span className="text-[10px] text-slate-300 uppercase font-semibold">Purok / Zone:</span>
-                          <div className="text-slate-100 font-mono">{inspectingReq.purok}</div>
+                          <span className="text-[10px] text-slate-300 uppercase font-semibold">Date of Birth & Age:</span>
+                          <div className="text-amber-200 font-mono font-bold">{formatBirthDateWithAge(inspectingReq.residentBirthDate)}</div>
                         </div>
                         <div>
-                          <span className="text-[10px] text-slate-300 uppercase font-semibold">Attachment:</span>
-                          <div className="text-emerald-300 font-bold">{inspectingReq.idAttachmentName || 'PhilSys ID'}</div>
+                          <span className="text-[10px] text-slate-300 uppercase font-semibold">Civil Status:</span>
+                          <div className="text-slate-100 font-bold">{inspectingReq.residentCivilStatus || 'Single'}</div>
                         </div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-300 uppercase font-semibold">Address:</span>
+                        <div className="text-slate-100">{inspectingReq.residentAddress} ({inspectingReq.purok})</div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-300 uppercase font-semibold">Attachment:</span>
+                        <div className="text-emerald-300 font-bold">{inspectingReq.idAttachmentName || 'PhilSys ID'}</div>
                       </div>
                     </div>
                   </div>

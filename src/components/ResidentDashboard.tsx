@@ -62,6 +62,20 @@ export const ResidentDashboard: React.FC<ResidentDashboardProps> = ({
     setEditYears(profile?.yearsOfResidency || 1);
   }, [user, profile]);
 
+  const formatBirthDateWithAge = (dateStr?: string) => {
+    if (!dateStr) return 'Not Specified';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const formatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const ageDifMs = Date.now() - d.getTime();
+      const age = Math.floor(ageDifMs / (365.25 * 24 * 60 * 60 * 1000));
+      return `${formatted} (${age} yrs old)`;
+    } catch {
+      return dateStr;
+    }
+  };
+
   const getDocTypeTitle = (type: ClearanceType) => {
     switch (type) {
       case 'barangay_clearance': return 'Barangay Clearance';
@@ -184,6 +198,8 @@ export const ResidentDashboard: React.FC<ResidentDashboardProps> = ({
             </p>
             <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 mt-2">
               <span>{profile?.idType || user.idType || 'Official ID'}: <span className="text-slate-900 font-bold font-mono">{profile?.idNumber || user.idNumber || 'VERIFIED-RES'}</span></span>
+              <span className="text-slate-300">•</span>
+              <span>Birthdate: <span className="text-slate-900 font-bold">{formatBirthDateWithAge(profile?.birthDate || user.birthDate)}</span></span>
               <span className="text-slate-300">•</span>
               <span>Civil Status: <span className="text-slate-900 font-bold">{profile?.civilStatus || 'Single'}</span></span>
               <span className="text-slate-300">•</span>
@@ -708,6 +724,15 @@ export const ResidentDashboard: React.FC<ResidentDashboardProps> = ({
                   <span className="font-bold">{profileError}</span>
                 </div>
               )}
+
+              {/* Registered Date of Birth (Official Civil Registry Record) */}
+              <div className="p-3 bg-blue-50/80 border border-blue-200/80 rounded-2xl flex items-center justify-between text-xs shadow-2xs">
+                <div>
+                  <span className="text-slate-500 block font-medium">Registered Date of Birth:</span>
+                  <strong className="text-slate-900 font-bold font-mono">{formatBirthDateWithAge(profile?.birthDate || user.birthDate)}</strong>
+                </div>
+                <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-lg border border-blue-200">Official Record</span>
+              </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1">

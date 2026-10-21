@@ -53,6 +53,20 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
 
 
 
+  const formatBirthDateWithAge = (dateStr?: string) => {
+    if (!dateStr) return 'Not Specified';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const formatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const ageDifMs = Date.now() - d.getTime();
+      const age = Math.floor(ageDifMs / (365.25 * 24 * 60 * 60 * 1000));
+      return `${formatted} (${age} yrs old)`;
+    } catch {
+      return dateStr;
+    }
+  };
+
   const handleOpenReview = (req: ClearanceRequest) => {
     setSelectedReq(req);
     setTargetStatus(req.status === 'submitted' ? 'under_review' : 'for_signature');
@@ -376,6 +390,14 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
                 <div>
                   <span className="text-slate-500 block font-medium">Reference No:</span>
                   <span className="font-mono font-bold text-blue-600">{selectedReq.referenceNumber}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block font-medium">Date of Birth & Age:</span>
+                  <strong className="text-slate-900 font-bold font-mono">{formatBirthDateWithAge(selectedReq.residentBirthDate)}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-500 block font-medium">Civil Status:</span>
+                  <span className="font-bold text-slate-800">{selectedReq.residentCivilStatus || 'Single'}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block font-medium">Document Type:</span>

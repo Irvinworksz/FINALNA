@@ -1507,10 +1507,13 @@ class ParameterizedDatabase {
       // Ensure attachments are attached
       const appDocs = this.getUploadedDocumentsByApplication(r.id);
       const residentUser = this.users.get(r.residentId);
+      const residentProf = this.profiles.get(r.residentId);
       const effectiveIdUrl = r.idAttachmentUrl || residentUser?.id_photo_url || residentUser?.avatar_url;
       const effectiveIdName = r.idAttachmentName || residentUser?.id_photo_name || 'registered_resident_id.jpg';
       return {
         ...r,
+        residentBirthDate: r.residentBirthDate || residentUser?.birth_date || residentProf?.birthDate || '1995-06-15',
+        residentCivilStatus: r.residentCivilStatus || residentUser?.civil_status || residentProf?.civilStatus || 'Single',
         idAttachmentUrl: effectiveIdUrl,
         idAttachmentName: effectiveIdName,
         attachments: appDocs.length > 0 ? appDocs : (r.attachments || []),
@@ -1541,8 +1544,17 @@ class ParameterizedDatabase {
     }
 
     const appDocs = this.getUploadedDocumentsByApplication(req.id);
+    const residentUser = this.users.get(req.residentId);
+    const residentProf = this.profiles.get(req.residentId);
+    const effectiveIdUrl = req.idAttachmentUrl || residentUser?.id_photo_url || residentUser?.avatar_url;
+    const effectiveIdName = req.idAttachmentName || residentUser?.id_photo_name || 'registered_resident_id.jpg';
+
     return {
       ...req,
+      residentBirthDate: req.residentBirthDate || residentUser?.birth_date || residentProf?.birthDate || '1995-06-15',
+      residentCivilStatus: req.residentCivilStatus || residentUser?.civil_status || residentProf?.civilStatus || 'Single',
+      idAttachmentUrl: effectiveIdUrl,
+      idAttachmentName: effectiveIdName,
       attachments: appDocs.length > 0 ? appDocs : (req.attachments || []),
       notificationsSent: this.sanitizeNotificationsForUser(req.notificationsSent, requestingUser)
     };

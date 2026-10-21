@@ -89,14 +89,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
 
   if (!isOpen) return null;
 
-  // Helper to filter out numbers from names immediately
+  // Helper to filter out numbers and special characters from names immediately
   const handleNameInput = (value: string, setter: (val: string) => void) => {
-    if (/[0-9]/.test(value)) {
+    if (/[^a-zA-Z\s]/.test(value)) {
       setNameHadNumberWarning(true);
       setTimeout(() => setNameHadNumberWarning(false), 3500);
     }
-    // Strictly strip all numbers (0-9)
-    const sanitized = value.replace(/[0-9]/g, '');
+    // Strictly strip all numbers and special characters, allowing only letters and spaces
+    const sanitized = value.replace(/[^a-zA-Z\s]/g, '');
     setter(sanitized);
   };
 
@@ -173,13 +173,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
         return;
       }
 
-      if (/[0-9]/.test(regFirstName) || /[0-9]/.test(regLastName) || (regMiddleName && /[0-9]/.test(regMiddleName))) {
-        setErrorMsg('Numbers are strictly not permitted in first, middle, or last name fields.');
+      if (!/^[a-zA-Z\s]+$/.test(regFirstName.trim())) {
+        setErrorMsg('First Name must contain alphabetical letters only. Numbers and special characters are not allowed.');
+        return;
+      }
+
+      if (!/^[a-zA-Z\s]+$/.test(regLastName.trim())) {
+        setErrorMsg('Last Name must contain alphabetical letters only. Numbers and special characters are not allowed.');
+        return;
+      }
+
+      if (regMiddleName.trim() && !/^[a-zA-Z\s]+$/.test(regMiddleName.trim())) {
+        setErrorMsg('Middle Name must contain alphabetical letters only.');
+        return;
+      }
+
+      if (!regBirthDate || !regBirthDate.trim()) {
+        setErrorMsg('Please select your Date of Birth.');
         return;
       }
 
       if (!regPurokZone) {
         setErrorMsg('Please select your Purok / Zone in Barangay Cabucbucan.');
+        return;
+      }
+
+      if (!regStreetAddress.trim()) {
+        setErrorMsg('Please enter your Street Address or House Number.');
         return;
       }
 
@@ -435,7 +455,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
           {nameHadNumberWarning && (
             <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl flex items-center gap-2 font-medium">
               <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
-              <span>Numbers are not allowed in name fields and were removed automatically.</span>
+              <span>Only alphabetical letters are allowed in name fields. Numbers and special characters were blocked.</span>
             </div>
           )}
 

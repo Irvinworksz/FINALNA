@@ -3,7 +3,7 @@ import {
   Bell, CheckCircle2, ChevronDown, Database, KeyRound, LogOut, 
   MessageSquare, QrCode, Shield, ShieldCheck, UserCheck, Users,
   Lock, Smartphone, Fingerprint, ExternalLink, X, AlertCircle, Clock,
-  Timer, RotateCcw
+  Timer, RotateCcw, Mail
 } from 'lucide-react';
 import type { NotificationRecord, User, UserRole } from '../types';
 

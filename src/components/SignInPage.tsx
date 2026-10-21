@@ -210,11 +210,12 @@ export const SignInPage: React.FC<SignInPageProps> = ({
   };
 
   const handleNameInput = (value: string, setter: (val: string) => void) => {
-    if (/[0-9]/.test(value)) {
+    if (/[^a-zA-Z\s]/.test(value)) {
       setNameHadNumberWarning(true);
       setTimeout(() => setNameHadNumberWarning(false), 3000);
     }
-    setter(value.replace(/[0-9]/g, ''));
+    // Strictly allow only alphabetical letters and spaces
+    setter(value.replace(/[^a-zA-Z\s]/g, ''));
   };
 
   const handleIdFileUpload = (file: File) => {
@@ -261,18 +262,81 @@ export const SignInPage: React.FC<SignInPageProps> = ({
 
     // Case A: Create Account / Registration
     if (isRegister) {
+      // 1. First Name & Last Name (Required, Letters only)
       if (!regFirstName.trim() || !regLastName.trim()) {
         setErrorMsg('Please enter your First Name and Last Name.');
         return;
       }
 
-      if (/[0-9]/.test(regFirstName) || /[0-9]/.test(regLastName) || (regMiddleName && /[0-9]/.test(regMiddleName))) {
-        setErrorMsg('Numbers are not permitted in first, middle, or last name fields.');
+      if (!/^[a-zA-Z\s]+$/.test(regFirstName.trim())) {
+        setErrorMsg('First Name must contain alphabetical letters only. Numbers and special characters are not allowed.');
         return;
       }
 
+      if (!/^[a-zA-Z\s]+$/.test(regLastName.trim())) {
+        setErrorMsg('Last Name must contain alphabetical letters only. Numbers and special characters are not allowed.');
+        return;
+      }
+
+      // Middle Name (Optional, but if provided, must be letters only)
+      if (regMiddleName.trim() && !/^[a-zA-Z\s]+$/.test(regMiddleName.trim())) {
+        setErrorMsg('Middle Name must contain alphabetical letters only.');
+        return;
+      }
+
+      // 2. Birth Date (Required)
+      if (!regBirthDate || !regBirthDate.trim()) {
+        setErrorMsg('Please select your Date of Birth.');
+        return;
+      }
+
+      // 3. Location & Address (Required)
+      if (!regPurokZone || !regPurokZone.trim()) {
+        setErrorMsg('Please select your Purok / Zone in Barangay Cabucbucan.');
+        return;
+      }
+
+      if (!regStreetAddress.trim()) {
+        setErrorMsg('Please enter your Street Address or House Number.');
+        return;
+      }
+
+      // 4. Contact & Email (Required)
+      const cleanContact = regContactNumber.replace(/[^0-9]/g, '');
+      if (!cleanContact || cleanContact.length !== 11) {
+        setErrorMsg('Mobile contact number is required and must be exactly 11 numeric digits (e.g. 09171234567).');
+        return;
+      }
+
+      if (!regEmail.trim() || !regEmail.includes('@')) {
+        setErrorMsg('Please provide a valid Email Address for official account notifications.');
+        return;
+      }
+
+      // 5. Valid Government ID & Attachment (Required)
+      if (!regIdType) {
+        setErrorMsg('Please select a valid Government ID Document type.');
+        return;
+      }
+
+      if (regIdType === 'Other Valid ID / Document' && !regCustomIdType.trim()) {
+        setErrorMsg('Please specify the type or name of your ID document.');
+        return;
+      }
+
+      if (!regIdPhotoUrl) {
+        setErrorMsg('Please upload a clear picture of your valid Government or Barangay ID document.');
+        return;
+      }
+
+      if (!regIdConsentAgreed) {
+        setErrorMsg('Please review and accept the ID verification consent agreement.');
+        return;
+      }
+
+      // 6. Username & Password (Required)
       if (!regUsername.trim()) {
-        setErrorMsg('Please choose a username.');
+        setErrorMsg('Please enter a username for your account.');
         return;
       }
 
@@ -289,27 +353,6 @@ export const SignInPage: React.FC<SignInPageProps> = ({
 
       if (regPassword !== regConfirmPassword) {
         setErrorMsg('Password and Confirm Password do not match.');
-        return;
-      }
-
-      if (!regIdConsentAgreed) {
-        setErrorMsg('Please review and accept the ID verification consent agreement.');
-        return;
-      }
-
-      if (!regIdPhotoUrl) {
-        setErrorMsg('Please upload a clear picture of your valid Government or Barangay ID document.');
-        return;
-      }
-
-      const cleanContact = regContactNumber.replace(/[^0-9]/g, '');
-      if (cleanContact.length !== 11) {
-        setErrorMsg('Mobile contact number must be exactly 11 numeric digits (e.g. 09171234567).');
-        return;
-      }
-
-      if (regIdType === 'Other Valid ID / Document' && !regCustomIdType.trim()) {
-        setErrorMsg('Please specify the type or name of your ID document.');
         return;
       }
 
@@ -790,15 +833,17 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                 </div>
 
                 {nameHadNumberWarning && (
-                  <p className="text-[10px] text-rose-600 font-medium">
-                    Numbers are not permitted in name fields.
+                  <p className="text-[10px] text-rose-600 font-semibold bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                    Only alphabetical letters are allowed in name fields. Numbers and special characters were blocked.
                   </p>
                 )}
 
                 {/* Middle Name and Suffix (Optional) */}
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">Middle Name</label>
+                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                      Middle Name <span className="text-slate-400 font-normal">(Optional)</span>
+                    </label>
                     <input
                       type="text"
                       value={regMiddleName}
@@ -808,11 +853,13 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">Suffix</label>
+                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                      Suffix <span className="text-slate-400 font-normal">(Optional)</span>
+                    </label>
                     <input
                       type="text"
                       value={regSuffix}
-                      onChange={(e) => setRegSuffix(e.target.value)}
+                      onChange={(e) => setRegSuffix(e.target.value.replace(/[^a-zA-Z0-9.\s]/g, ''))}
                       placeholder="Jr., Sr., III"
                       className="w-full px-3 py-2 bg-white/80 border border-slate-300 rounded-xl text-xs text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
@@ -839,15 +886,46 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">Street Address</label>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1">Street Address *</label>
                     <input
                       type="text"
+                      required
                       value={regStreetAddress}
                       onChange={(e) => setRegStreetAddress(e.target.value)}
                       placeholder="House / Street"
                       className="w-full px-3 py-2 bg-white/80 border border-slate-300 rounded-xl text-xs text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
+                </div>
+
+                {/* Date of Birth */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-700 block">
+                      Date of Birth *
+                    </label>
+                    {regBirthDate && (
+                      <span className="text-[10px] text-blue-700 font-semibold font-mono">
+                        {(() => {
+                          const birth = new Date(regBirthDate);
+                          if (!isNaN(birth.getTime())) {
+                            const ageDifMs = Date.now() - birth.getTime();
+                            const age = Math.floor(ageDifMs / (365.25 * 24 * 60 * 60 * 1000));
+                            return `${age} years old`;
+                          }
+                          return '';
+                        })()}
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="date"
+                    required
+                    value={regBirthDate}
+                    max={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setRegBirthDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-white/80 border border-slate-300 rounded-xl text-xs text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
 
                 {/* Contact & Email */}
