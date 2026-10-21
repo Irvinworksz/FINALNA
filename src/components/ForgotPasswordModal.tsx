@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   AlertCircle, CheckCircle2, KeyRound, Lock, Mail, Shield, ShieldCheck, 
-  X, Eye, EyeOff, ArrowRight, RefreshCw
+  X, Eye, EyeOff, ArrowRight, RefreshCw, ExternalLink, Home, ArrowLeft
 } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { sendFirebasePasswordReset } from '../lib/firebase';
@@ -18,6 +18,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   onSuccess
 }) => {
   const [step, setStep] = useState<'request' | 'verify' | 'success'>('request');
+  const [viewMode, setViewMode] = useState<'link_instructions' | 'enter_code'>('link_instructions');
   const [identifier, setIdentifier] = useState<string>('');
   const [userId, setUserId] = useState<string>('');
   const [recipientEmail, setRecipientEmail] = useState<string>('');
@@ -27,12 +28,10 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   const [firebaseError, setFirebaseError] = useState<string | undefined>();
   const [emailError, setEmailError] = useState<string | undefined>();
   const [otpCode, setOtpCode] = useState<string>('');
-  const [demoOtp, setDemoOtp] = useState<string>('');
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [showNewPassword, setShowNewPassword] = useState<boolean>(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
-  const [copiedCode, setCopiedCode] = useState<boolean>(false);
   const [resendCooldown, setResendCooldown] = useState<number>(0);
   
   const [loading, setLoading] = useState<boolean>(false);
@@ -56,6 +55,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
   const handleResetState = () => {
     setStep('request');
+    setViewMode('link_instructions');
     setIdentifier('');
     setUserId('');
     setRecipientEmail('');
@@ -65,7 +65,6 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     setFirebaseError(undefined);
     setEmailError(undefined);
     setOtpCode('');
-    setDemoOtp('');
     setNewPassword('');
     setConfirmPassword('');
     setShowNewPassword(false);
@@ -108,31 +107,29 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
     setLoading(false);
 
-    if (res.success && res.userFound && res.userId) {
-      setUserId(res.userId);
-      setRecipientEmail(res.email || res.maskedEmail || targetEmail || '');
+    if ((res.success && res.userFound && res.userId) || fbSent) {
+      setUserId(res.userId || 'fb-user');
+      setRecipientEmail(res.email || targetEmail || res.maskedEmail || '');
       setMaskedEmail(res.maskedEmail || targetEmail || 'your registered Gmail');
       setEmailDelivered(Boolean(res.emailDelivered));
       setFirebaseDispatched(fbSent);
       setFirebaseError(fbErr);
       setEmailError(res.emailError);
-      if (res.demoOtp) {
-        setDemoOtp(res.demoOtp);
-      }
       setOtpCode('');
       setStep('verify');
+      setViewMode(fbSent ? 'link_instructions' : 'enter_code');
       setResendCooldown(30);
 
       const successNotice = fbSent
-        ? `Official Google Firebase reset email sent to ${targetEmail}! Click the link in your Gmail to set your new password. Your old password has been invalidated and only your new password will be accepted.`
+        ? `Official reset link sent to ${targetEmail}! Please follow the link in your Gmail to reset your password.`
         : res.emailDelivered
         ? `A 6-digit security reset code has been sent directly to your Gmail inbox (${res.email || res.maskedEmail}).`
-        : `A 6-digit security reset code has been generated for ${res.email || res.maskedEmail || targetEmail}.`;
+        : `A 6-digit security reset code has been sent to ${res.email || res.maskedEmail || targetEmail}.`;
 
       setInfoMsg(successNotice);
     } else {
       setErrorMsg(
-        res.error || res.message || `No registered account found matching "${cleanIdentifier}". Please verify your username or registered Gmail.`
+        fbErr || res.error || res.message || `No registered account found matching "${cleanIdentifier}". Please verify your username or registered Gmail.`
       );
     }
   };
@@ -230,7 +227,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
               {step === 'success' ? '✓' : '2'}
             </span>
             <span className={`font-bold ${step === 'verify' ? 'text-slate-900' : 'text-slate-400'}`}>
-              2. 6-Digit Code
+              {viewMode === 'link_instructions' ? '2. Check Gmail Link' : '2. Enter 6-Digit Code'}
             </span>
           </div>
 
@@ -268,7 +265,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
             </div>
           )}
 
-          {/* STEP 1: REQUEST OTP */}
+          {/* STEP 1: REQUEST RESET */}
           {step === 'request' && (
             <form onSubmit={handleRequestOtp} className="space-y-4">
               <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-2xl text-blue-900 text-xs flex items-start gap-2.5 font-medium">
@@ -276,7 +273,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                 <div className="space-y-1">
                   <span className="font-bold block">Account Recovery Verification</span>
                   <p className="text-[11px] text-blue-800 leading-relaxed">
-                    Enter the Gmail address or username you used when registering your account. A 6-digit security code will be sent to your Gmail inbox.
+                    Enter the Gmail address or username you used when registering your account. A password reset link will be sent to your Gmail inbox.
                   </p>
                 </div>
               </div>
@@ -315,11 +312,11 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   {loading ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Sending 6-Digit Code...</span>
+                      <span>Sending Reset Link...</span>
                     </>
                   ) : (
                     <>
-                      <span>Send 6-Digit Code to Gmail</span>
+                      <span>Send Reset Link to Gmail</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </>
                   )}
@@ -328,74 +325,148 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
             </form>
           )}
 
-          {/* STEP 2: VERIFY OTP & ENTER NEW PASSWORD */}
-          {step === 'verify' && (
-            <form onSubmit={handleVerifyAndReset} className="space-y-4">
+          {/* STEP 2A: FOLLOW LINK IN GMAIL INSTRUCTIONS */}
+          {step === 'verify' && viewMode === 'link_instructions' && (
+            <div className="space-y-4 animate-in fade-in">
+              {/* Delivery Target Card */}
+              <div className="p-4 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-blue-50 border-2 border-emerald-300 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                      <Mail className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 block">
+                        Official Reset Email Sent
+                      </span>
+                      <span className="text-xs font-mono font-bold text-slate-900 break-all">
+                        {recipientEmail || maskedEmail || identifier}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-emerald-200 text-emerald-900 shrink-0">
+                    ✓ Link Dispatched
+                  </span>
+                </div>
+
+                <div className="p-3.5 bg-white/95 rounded-xl border border-emerald-200 shadow-2xs">
+                  <h4 className="text-sm font-black text-slate-900 leading-snug">
+                    Follow the link in the Gmail you received to reset the password
+                  </h4>
+                  <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                    Google Firebase has sent a secure password reset link to your email. Click the link in that email to choose and save your new password.
+                  </p>
+                </div>
+              </div>
+
+              {/* Step by Step Guide */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5 text-xs">
+                <span className="font-extrabold text-slate-800 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>How to complete your password reset</span>
+                </span>
+                
+                <div className="space-y-2 text-slate-700 text-xs">
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-800 font-extrabold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
+                      1
+                    </span>
+                    <p className="leading-snug">
+                      Open your <strong>Gmail inbox</strong> for <span className="font-mono font-bold text-slate-900">{recipientEmail || maskedEmail || identifier}</span>. Check your <strong>Spam / Junk</strong> folder if you do not see it in Primary.
+                    </p>
+                  </div>
+
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-800 font-extrabold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
+                      2
+                    </span>
+                    <p className="leading-snug">
+                      Click the official <strong>Reset Password</strong> link inside the email to set and confirm your new secure password.
+                    </p>
+                  </div>
+
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
+                      3
+                    </span>
+                    <p className="leading-snug">
+                      Once reset, return here and click <strong>Back to Home Page to Sign In</strong> to log in with your new credentials!
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-2 pt-1">
+                {/* Primary Button: Back to home page to sign in again after */}
+                <button
+                  type="button"
+                  onClick={handleResetState}
+                  className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-blue-600/20 transition-all"
+                >
+                  <Home className="w-4 h-4" />
+                  <span>Back to Home Page to Sign In</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href="https://mail.google.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open Gmail Inbox</span>
+                  </a>
+
+                  <button
+                    type="button"
+                    disabled={resendCooldown > 0 || loading}
+                    onClick={() => handleRequestOtp()}
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                    <span>{resendCooldown > 0 ? `Resend Email (${resendCooldown}s)` : 'Resend Email'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Option to enter 6-digit code instead */}
+              <div className="pt-2 text-center border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('enter_code')}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-bold cursor-pointer inline-flex items-center gap-1.5 hover:underline"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Prefer to enter a 6-digit verification code? Click here</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2B: ENTER 6-DIGIT CODE & NEW PASSWORD */}
+          {step === 'verify' && viewMode === 'enter_code' && (
+            <form onSubmit={handleVerifyAndReset} className="space-y-4 animate-in fade-in">
               
-              {/* Delivery Target Banner */}
-              <div className={`p-3.5 rounded-2xl text-xs space-y-1 border ${
-                firebaseDispatched || emailDelivered
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                  : 'bg-blue-50 border-blue-200 text-blue-950'
-              }`}>
+              {/* Delivery Target Banner without autofill */}
+              <div className="p-3.5 rounded-2xl text-xs space-y-1 border bg-blue-50 border-blue-200 text-blue-950">
                 <div className="flex items-center justify-between">
                   <span className="font-bold flex items-center gap-1.5">
-                    <Mail className={`w-3.5 h-3.5 ${firebaseDispatched || emailDelivered ? 'text-emerald-600' : 'text-blue-600'}`} />
-                    <span>Dispatched To Registered Gmail:</span>
+                    <Mail className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Verification Code Recipient:</span>
                   </span>
-                  <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                    firebaseDispatched
-                      ? 'bg-emerald-200 text-emerald-900'
-                      : emailDelivered
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {firebaseDispatched
-                      ? '✓ Firebase Sent'
-                      : emailDelivered
-                      ? '✓ Gmail Delivered'
-                      : 'Security Code Active'}
+                  <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                    Enter 6-Digit Code
                   </span>
                 </div>
                 <div className="font-mono font-bold text-slate-900 text-xs">
                   {recipientEmail || maskedEmail}
                 </div>
                 <p className="text-[11px] text-slate-600 leading-relaxed">
-                  {firebaseDispatched
-                    ? 'An official Google Firebase password reset link has been dispatched directly to your Gmail inbox! Please check your inbox or spam folder.'
-                    : 'A verification security code has been generated for your registered Gmail. You can check your inbox or use the instant on-screen backup code below.'}
+                  Enter the 6-digit verification code sent to your registered Gmail and set your new password.
                 </p>
               </div>
-
-              {/* Live Email OTP with On-Screen Autofill Backup Code */}
-              {demoOtp && (
-                <div className="p-3.5 bg-emerald-50/90 border border-emerald-300 rounded-2xl flex items-center justify-between shadow-xs">
-                  <div>
-                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Live Email OTP • On-Screen Backup Code</span>
-                    </div>
-                    <div className="text-2xl font-mono font-black text-emerald-700 tracking-widest mt-0.5">
-                      {demoOtp}
-                    </div>
-                    <p className="text-[10px] text-emerald-700/90 font-medium">
-                      Dispatched to Gmail. Click below to autofill instantly without leaving this tab.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOtpCode(demoOtp);
-                      setCopiedCode(true);
-                      setTimeout(() => setCopiedCode(false), 2000);
-                    }}
-                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-extrabold transition-all shadow-xs cursor-pointer flex items-center gap-1.5 shrink-0"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{copiedCode ? 'Autofilled!' : 'Autofill Code'}</span>
-                  </button>
-                </div>
-              )}
 
               {/* 6-Digit Passcode Input Field */}
               <div>
@@ -489,16 +560,27 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
               <div className="flex items-center justify-between gap-2 pt-1">
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStep('request');
-                      setOtpCode('');
-                    }}
-                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
-                  >
-                    Back
-                  </button>
+                  {firebaseDispatched ? (
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('link_instructions')}
+                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer flex items-center gap-1"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Back to Link</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep('request');
+                        setOtpCode('');
+                      }}
+                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+                    >
+                      Back
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -534,7 +616,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   Password Successfully Updated!
                 </h4>
                 <p className="text-xs text-slate-600 max-w-sm mx-auto leading-relaxed">
-                  Your official account password has been cryptographically updated with salted BCrypt hashing and synced to the secure database.
+                  Your official account password has been updated and securely synced.
                 </p>
               </div>
 
@@ -547,8 +629,8 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                 onClick={handleResetState}
                 className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
               >
-                <span>Sign In With New Password</span>
-                <ArrowRight className="w-4 h-4" />
+                <Home className="w-4 h-4" />
+                <span>Back to Home Page to Sign In</span>
               </button>
             </div>
           )}

@@ -5,7 +5,7 @@ import {
   Users, Lock, Shield, User, Globe
 } from 'lucide-react';
 import { validateFirebaseConnection, auth, getCurrentFirebaseUser } from '../lib/firebase';
-import firebaseConfig from '../../firebase-applet-config.json';
+import firebaseConfig from '../lib/firebaseConfig';
 
 interface FirebaseCloudConsoleModalProps {
   isOpen: boolean;

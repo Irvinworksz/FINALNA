@@ -11,11 +11,18 @@ import {
   type User as FirebaseUser
 } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import firebaseConfig from './firebaseConfig';
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const auth = getAuth(app);
-export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || '(default)');
+let app: any;
+try {
+  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+} catch (e) {
+  console.warn('[Firebase] App init warning:', e);
+  app = getApps()[0];
+}
+
+export const auth = app ? getAuth(app) : ({} as any);
+export const db = app ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || '(default)') : ({} as any);
 
 // Validate connection to Firestore on initialization per IAS security checklist
 export async function validateFirebaseConnection(): Promise<{ connected: boolean; error?: string }> {
@@ -175,6 +182,27 @@ export async function sendFirebasePasswordReset(email: string): Promise<{
     return { success: true };
   } catch (err: any) {
     console.warn('[Firebase Auth] sendPasswordResetEmail notice:', err?.code, err?.message);
+
+    // If user is not yet created in Firebase Auth, auto-provision and immediately dispatch the reset link
+    if (err?.code === 'auth/user-not-found' || err?.message?.includes('user-not-found')) {
+      try {
+        const cleanEmail = email.trim().toLowerCase();
+        console.info(`[Firebase Auth] Auto-provisioning Firebase user record for ${cleanEmail} to dispatch reset email...`);
+        const tempPass = `Reset_${Math.random().toString(36).substring(2, 9)}!9A`;
+        await createUserWithEmailAndPassword(auth, cleanEmail, tempPass);
+        await sendPasswordResetEmail(auth, cleanEmail);
+        console.info(`[Firebase Auth] Real password reset email successfully dispatched after auto-provisioning to ${cleanEmail}`);
+        return { success: true };
+      } catch (autoErr: any) {
+        console.warn('[Firebase Auth] Auto-provisioning fallback error:', autoErr?.code, autoErr?.message);
+        return {
+          success: false,
+          code: autoErr?.code,
+          error: autoErr?.message || 'Firebase email dispatch error'
+        };
+      }
+    }
+
     return {
       success: false,
       code: err?.code,
