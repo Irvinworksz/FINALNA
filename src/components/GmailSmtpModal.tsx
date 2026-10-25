@@ -17,7 +17,7 @@ export const GmailSmtpModal: React.FC<GmailSmtpModalProps> = ({
 }) => {
   const [gmailUser, setGmailUser] = useState<string>('');
   const [gmailAppPassword, setGmailAppPassword] = useState<string>('');
-  const [forwardingEmail, setForwardingEmail] = useState<string>('delacruzjohnirvin05@gmail.com');
+  const [forwardingEmail, setForwardingEmail] = useState<string>('carinok92@gmail.com');
   const [forwardAllMfaToAdmin, setForwardAllMfaToAdmin] = useState<boolean>(true);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   

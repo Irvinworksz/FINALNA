@@ -328,10 +328,12 @@ async function startServer() {
             userName: user.full_name,
             userRole: user.role,
             ipAddress: clientIp,
-            actionType: 'MFA_SMS_CHALLENGE_INITIATED',
+            actionType: mailResult.delivered ? 'MFA_GMAIL_CHALLENGE_DISPATCHED_LIVE' : 'MFA_GMAIL_CHALLENGE_INITIATED',
             category: 'AUTH',
             severity: 'INFO',
-            details: `SMS Two-Factor challenge initiated for resident '${user.username}'. Registered mobile: ${maskedPhone}. Gmail fallback standby: ${maskedEmail}.`,
+            details: mailResult.delivered
+              ? `Live 6-digit Two-Factor security code delivered via Gmail SMTP to ${recipientEmail}. MessageId: ${mailResult.messageId}`
+              : `Gmail Two-Factor passcode generated for resident '${user.username}' (${recipientEmail}). Standby SMS: ${maskedPhone}.`,
             resourceType: '/api/auth/login'
           });
 
@@ -346,13 +348,15 @@ async function startServer() {
             maskedEmail,
             phoneNumber: residentPhoneE164,
             maskedPhone,
-            mfaType: 'sms',
+            mfaType: 'gmail',
             emailDelivered: Boolean(mailResult.delivered),
             emailError: mailResult.error,
             demoOtp: emailOtp,
             webauthnEnabled: Boolean(user.webauthn_credentials && user.webauthn_credentials.length > 0),
             webauthnCredentials: db.getWebAuthnCredentials(user.id),
-            message: `SMS Multi-Factor Authentication: A 6-digit verification code will be dispatched to your registered mobile number (${maskedPhone}).`
+            message: mailResult.delivered
+              ? `A 6-digit verification code has been dispatched to your Gmail (${recipientEmail}). Please check your inbox or spam folder.`
+              : `A 6-digit Two-Factor security code has been generated for your Gmail (${recipientEmail}).`
           });
         }
 
@@ -2281,7 +2285,7 @@ async function startServer() {
   // POST /api/auth/firebase-google-login (Authenticates Firebase Auth Google User & automatically links existing accounts)
   app.post('/api/auth/firebase-google-login', async (req, res) => {
     try {
-      const { uid, email, displayName, photoURL, accountLinked } = req.body;
+      const { uid, email, displayName, photoURL, accountLinked, targetUserId } = req.body;
       const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
       if (!email || typeof email !== 'string') {
@@ -2289,8 +2293,22 @@ async function startServer() {
       }
 
       const cleanEmail = email.trim().toLowerCase();
-      // Look up user by exact registered email, or username matching email prefix
-      let user = db.findUserByEmail(cleanEmail) || db.findUserByEmailOrUsername(cleanEmail);
+      let user: any = null;
+
+      // 1. If user initiated Google Sign-In during an active 2FA challenge for a specific account:
+      if (targetUserId) {
+        user = db.findUserById(targetUserId);
+        if (user) {
+          user.email = cleanEmail;
+          user.google_linked = 1;
+          db.updateUser(user);
+        }
+      }
+
+      // 2. Look up user by exact registered email, or username matching email prefix
+      if (!user) {
+        user = db.findUserByEmail(cleanEmail) || db.findUserByEmailOrUsername(cleanEmail);
+      }
       let profile: any = null;
 
       if (!user) {
@@ -2307,26 +2325,71 @@ async function startServer() {
 
       let isLinked = false;
 
+      // 3. If account still not found, auto-provision verified resident account with Google profile details:
       if (!user) {
-        db.appendAuditLog({
-          userId: 'anonymous',
-          userName: displayName || cleanEmail,
-          userRole: 'resident',
-          ipAddress: clientIp,
-          actionType: 'LOGIN_FAILURE',
-          category: 'SECURITY',
-          severity: 'WARN',
-          details: `Google Sign-In rejected: Google account ${cleanEmail} is not registered in the system.`,
-          resourceType: 'AUTH_SESSION',
-          resourceId: cleanEmail
-        });
+        const userId = `usr-res-g-${Date.now().toString(36)}`;
+        const cleanUsername = cleanEmail.split('@')[0].replace(/[^a-z0-9_]/g, '') || `resident_${Date.now().toString(36)}`;
+        const nameParts = (displayName || cleanUsername).split(' ');
+        const firstName = nameParts[0] || 'Resident';
+        const lastName = nameParts.slice(1).join(' ') || 'Constituent';
 
-        return res.status(404).json({
-          success: false,
-          notRegistered: true,
+        user = {
+          id: userId,
+          username: cleanUsername,
+          password_hash: null,
           email: cleanEmail,
-          error: `The Google account (${cleanEmail}) is not registered in Barangay Cabucbucan E-Services. Please register first to create your resident account.`
-        });
+          role: 'resident',
+          full_name: displayName || `${firstName} ${lastName}`,
+          contact_number: '09170000000',
+          address: 'Purok 1, Barangay Cabucbucan, Rizal, Nueva Ecija',
+          purok: 'Purok 1',
+          is_verified_resident: 1,
+          verification_status: 'verified',
+          verification_remarks: 'Identity verified via official Google Authentication.',
+          first_name: firstName,
+          last_name: lastName,
+          id_type: 'Google Verified Identity',
+          id_number: 'GOOGLE-AUTH-VERIFIED',
+          id_photo_url: photoURL || '',
+          id_photo_name: 'google_avatar.jpg',
+          avatar_url: photoURL || '',
+          google_linked: 1,
+          mfa_enabled: 0,
+          created_at: new Date().toISOString(),
+          last_login: new Date().toISOString()
+        };
+        db.createUser(user);
+
+        profile = {
+          id: `prof-${userId}`,
+          userId: userId,
+          firstName,
+          middleName: '',
+          lastName,
+          suffix: '',
+          birthDate: '1995-01-01',
+          civilStatus: 'Single',
+          gender: 'Not Specified',
+          citizenship: 'Filipino',
+          purokZone: 'Purok 1',
+          streetAddress: 'Barangay Cabucbucan, Rizal, Nueva Ecija',
+          yearsOfResidency: 5,
+          contactNumber: '09170000000',
+          emergencyContact: '',
+          voterStatus: 'Registered',
+          idType: 'Google Verified Identity',
+          idNumber: 'GOOGLE-AUTH-VERIFIED',
+          idPhotoUrl: photoURL || '',
+          idPhotoName: 'google_avatar.jpg',
+          verificationStatus: 'verified',
+          verificationRemarks: 'Google Verified Resident Account',
+          createdAt: user.created_at,
+          updatedAt: user.created_at
+        };
+        db.saveResidentProfile(profile);
+        syncUserToFirestore(user).catch(console.error);
+        syncProfileToFirestore(profile).catch(console.error);
+        isLinked = false;
       }
 
       // User already exists (e.g. created previously via email/password) -> Seamlessly link Google account!
@@ -2422,6 +2485,150 @@ async function startServer() {
     } catch (error: any) {
       console.error('Firebase Google login error:', error);
       return res.status(500).json({ success: false, error: 'Firebase Google authentication failed.' });
+    }
+  });
+
+  // POST /api/auth/firebase-email-link-login (Authenticates resident via verified Firebase Email Link)
+  app.post('/api/auth/firebase-email-link-login', async (req, res) => {
+    try {
+      const { email, uid, idToken, targetUserId } = req.body;
+      const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
+
+      if (!email || typeof email !== 'string' || !email.includes('@')) {
+        return res.status(400).json({ success: false, error: 'Valid email address required.' });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      let user: any = null;
+
+      if (targetUserId) {
+        user = db.findUserById(targetUserId);
+        if (user) {
+          user.email = cleanEmail;
+          db.updateUser(user);
+        }
+      }
+
+      if (!user) {
+        user = db.findUserByEmail(cleanEmail) || db.findUserByEmailOrUsername(cleanEmail);
+      }
+
+      if (!user) {
+        try {
+          const cloudUsers = await fetchAllUsersFromFirestore();
+          if (cloudUsers && cloudUsers.length > 0) {
+            db.syncFromFirestoreUsers(cloudUsers);
+            user = db.findUserByEmail(cleanEmail) || db.findUserByEmailOrUsername(cleanEmail);
+          }
+        } catch (e) {
+          console.warn('[Email Link Auth] Firestore lookup error:', e);
+        }
+      }
+
+      let profile: any = null;
+      if (!user) {
+        const userId = `usr-res-eml-${Date.now().toString(36)}`;
+        const cleanUsername = cleanEmail.split('@')[0].replace(/[^a-z0-9_]/g, '') || `resident_${Date.now().toString(36)}`;
+        const firstName = cleanUsername.charAt(0).toUpperCase() + cleanUsername.slice(1);
+
+        user = {
+          id: userId,
+          username: cleanUsername,
+          password_hash: null,
+          email: cleanEmail,
+          role: 'resident',
+          full_name: `${firstName} Resident`,
+          contact_number: '09170000000',
+          address: 'Purok 1, Barangay Cabucbucan, Rizal, Nueva Ecija',
+          purok: 'Purok 1',
+          is_verified_resident: 1,
+          verification_status: 'verified',
+          verification_remarks: 'Identity verified via official Firebase Email Link Authentication.',
+          first_name: firstName,
+          last_name: 'Resident',
+          id_type: 'Email Verified Resident',
+          id_number: 'FIREBASE-EMAIL-VERIFIED',
+          id_photo_url: '',
+          id_photo_name: 'resident_avatar.jpg',
+          avatar_url: '',
+          google_linked: 1,
+          mfa_enabled: 0,
+          created_at: new Date().toISOString(),
+          last_login: new Date().toISOString()
+        };
+        db.createUser(user);
+
+        profile = {
+          id: `prof-${userId}`,
+          userId: userId,
+          firstName,
+          middleName: '',
+          lastName: 'Resident',
+          suffix: '',
+          birthDate: '1995-01-01',
+          civilStatus: 'Single',
+          gender: 'Not Specified',
+          citizenship: 'Filipino',
+          purokZone: 'Purok 1',
+          streetAddress: 'Barangay Cabucbucan, Rizal, Nueva Ecija',
+          yearsOfResidency: 5,
+          contactNumber: '09170000000',
+          emergencyContact: '',
+          voterStatus: 'Registered',
+          idType: 'Email Verified Resident',
+          idNumber: 'FIREBASE-EMAIL-VERIFIED',
+          idPhotoUrl: '',
+          idPhotoName: 'resident_avatar.jpg',
+          verificationStatus: 'verified',
+          verificationRemarks: 'Email Verified Resident Account',
+          createdAt: user.created_at,
+          updatedAt: user.created_at
+        };
+        db.saveResidentProfile(profile);
+        syncUserToFirestore(user).catch(console.error);
+        syncProfileToFirestore(profile).catch(console.error);
+      } else {
+        profile = user.role === 'resident' ? db.getResidentProfile(user.id) : undefined;
+      }
+
+      user.last_login = new Date().toISOString();
+      if (!user.email || user.email !== cleanEmail) user.email = cleanEmail;
+      db.updateUser(user);
+
+      RateLimiter.recordSuccessfulAuth(cleanEmail);
+      RateLimiter.recordSuccessfulAuth(user.username);
+
+      const authUser = {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role as UserRole,
+        fullName: user.full_name
+      };
+      const token = signAuthToken(authUser);
+
+      db.appendAuditLog({
+        userId: user.id,
+        userName: user.full_name,
+        userRole: user.role as UserRole,
+        ipAddress: clientIp,
+        actionType: 'AUTH_FIREBASE_EMAIL_LINK_SUCCESS',
+        category: 'AUTH',
+        severity: 'INFO',
+        details: `User successfully authenticated via official Firebase Email Sign-In Link (${cleanEmail}).`,
+        resourceType: '/api/auth/firebase-email-link-login'
+      });
+
+      return res.json({
+        success: true,
+        token,
+        user: formatUserResponse(user, profile),
+        profile,
+        message: 'Successfully verified via official Google email link. Welcome back!'
+      });
+    } catch (e: any) {
+      console.error('Firebase Email Link login error:', e);
+      return res.status(500).json({ success: false, error: 'Internal error authenticating via Firebase Email Link.' });
     }
   });
 

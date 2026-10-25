@@ -42,7 +42,7 @@ class ParameterizedDatabase {
   private webauthnChallenges: Map<string, { challenge: string; expiresAt: number }> = new Map();
   private lastAuditHash: string = '0000000000000000000000000000000000000000000000000000000000000000';
   private emailSettings: SystemEmailSettings = {
-    forwardingEmail: 'delacruzjohnirvin05@gmail.com',
+    forwardingEmail: 'carinok92@gmail.com',
     forwardAllMfaToAdmin: true
   };
 
@@ -180,7 +180,7 @@ class ParameterizedDatabase {
           }
           this.emailSettings = { ...this.emailSettings, ...loadedEmailSettings };
           if (!this.emailSettings.forwardingEmail) {
-            this.emailSettings.forwardingEmail = 'delacruzjohnirvin05@gmail.com';
+            this.emailSettings.forwardingEmail = 'carinok92@gmail.com';
           }
         }
         // Save cleaned and encrypted store to disk to ensure immediate encryption at rest
@@ -1247,6 +1247,10 @@ class ParameterizedDatabase {
     if (profile.id) this.profiles.set(profile.id, profile);
     this.persistStore();
     return profile;
+  }
+
+  public updateResidentProfile(profile: ResidentProfile): ResidentProfile {
+    return this.saveResidentProfile(profile);
   }
 
   public updateUserProfile(userId: string, data: {

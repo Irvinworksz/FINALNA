@@ -1,5 +1,4 @@
 /// <reference types="vite/client" />
-import rawConfig from '../../firebase-applet-config.json';
 
 export interface FirebaseAppConfig {
   projectId: string;
@@ -23,6 +22,9 @@ export const fallbackFirebaseConfig: FirebaseAppConfig = {
   firestoreDatabaseId: 'ai-studio-securebarangayec-e1ce6f07-2475-4656-8ed0-42c844f0e436',
   oAuthClientId: '1080932597738-t701ebclpnkotgacrottqrdsla178k8u.apps.googleusercontent.com'
 };
+
+const configModules = import.meta.glob('../../firebase-applet-config.json', { eager: true }) as Record<string, { default: any }>;
+const rawConfig = configModules['../../firebase-applet-config.json']?.default || {};
 
 export const firebaseConfig: FirebaseAppConfig = {
   ...fallbackFirebaseConfig,

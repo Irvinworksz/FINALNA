@@ -30,6 +30,17 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    // Firebase Trigger Email extension collections
+    match /mail/{mailId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /emails/{emailId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     // Clearance Requests: residents, staff, and captain workflows
     match /clearanceRequests/{requestId} {
       allow read: if true;

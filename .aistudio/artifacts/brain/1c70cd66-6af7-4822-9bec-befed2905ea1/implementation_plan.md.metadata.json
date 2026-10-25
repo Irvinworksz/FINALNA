@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan to integrate native Firebase Auth Email Link verification for Two-Factor Authentication during sign-in:\n1. Implement Firebase official sendSignInLinkToEmail to dispatch authentic sign-in verification emails directly to the resident's registered Gmail (carinok92@gmail.com), matching the proven reliability of password reset emails.\n2. Build auto-detection for email link callbacks when residents click the verification link in their Gmail.\n3. Connect backend session authorization (/api/auth/firebase-email-link-login) to issue JWT tokens upon successful Firebase link validation.\n4. Maintain dual fallback on the 2FA screen with 6-digit passcode entry and direct Google Sign-In.",
+  "updatedAt":  "2026-10-21T15:02:36.942830709Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

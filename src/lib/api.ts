@@ -202,6 +202,20 @@ export const apiClient = {
     return res;
   },
 
+  async firebaseEmailLinkLogin(data: { email: string; uid?: string; idToken?: string; targetUserId?: string }) {
+    const res = await makeRequest<{ user: User; token: string; profile?: ResidentProfile }>('/api/auth/firebase-email-link-login', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+
+    if (res.success && res.token && res.user) {
+      this.setToken(res.token);
+      this.setStoredUser(res.user);
+    }
+
+    return res;
+  },
+
   async resendMfaOtp(data: { userId?: string; username?: string; destinationEmail?: string; destinationPhone?: string }) {
     return makeRequest<{
       email: string;

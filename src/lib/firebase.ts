@@ -6,10 +6,14 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   RecaptchaVerifier,
   signInWithPhoneNumber,
+  type ActionCodeSettings,
   type ConfirmationResult,
   type User as FirebaseUser
 } from 'firebase/auth';
@@ -55,7 +59,7 @@ googleProvider.setCustomParameters({
  * Sign in using Google Authentication via Firebase Auth SDK
  * Automatically handles and resolves account-exists-with-different-credential to link registered accounts
  */
-export async function signInWithGoogleFirebase(): Promise<{
+export async function signInWithGoogleFirebase(targetUserId?: string): Promise<{
   success: boolean;
   user?: any;
   profile?: any;
@@ -81,7 +85,8 @@ export async function signInWithGoogleFirebase(): Promise<{
         displayName: fbUser.displayName,
         photoURL: fbUser.photoURL,
         idToken,
-        accountLinked: false
+        accountLinked: false,
+        targetUserId
       })
     });
 
@@ -210,6 +215,150 @@ export async function sendFirebasePasswordReset(email: string): Promise<{
       success: false,
       code: err?.code,
       error: err?.message || 'Firebase email dispatch error'
+    };
+  }
+}
+
+/**
+ * Sends an official Google Firebase passwordless sign-in verification link directly to the user's registered Gmail
+ * Delivers directly through Google's noreply mail servers without requiring SMTP credentials
+ */
+export async function sendFirebaseSignInEmailLink(email: string): Promise<{
+  success: boolean;
+  error?: string;
+  code?: string;
+}> {
+  try {
+    const cleanEmail = email.trim().toLowerCase();
+    
+    // Store email in localStorage so it can be retrieved when user clicks the link in their email
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('emailForSignIn', cleanEmail);
+    }
+
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+    const actionCodeSettings: ActionCodeSettings = {
+      // Must point to origin with flag and email so the app recognizes it on landing
+      url: `${origin}/?emailSignIn=true&email=${encodeURIComponent(cleanEmail)}`,
+      handleCodeInApp: true
+    };
+
+    console.info(`[Firebase Auth] Dispatching official sign-in link to ${cleanEmail}...`);
+    await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
+    console.info(`[Firebase Auth] Official sign-in link successfully dispatched to ${cleanEmail}`);
+    return { success: true };
+  } catch (err: any) {
+    console.warn('[Firebase Auth] sendSignInLinkToEmail notice:', err?.code, err?.message);
+
+    // If user is not yet created in Firebase Auth, auto-provision and retry
+    if (err?.code === 'auth/user-not-found' || err?.message?.includes('user-not-found')) {
+      try {
+        const cleanEmail = email.trim().toLowerCase();
+        const tempPass = `Link_${Math.random().toString(36).substring(2, 9)}!9A`;
+        await createUserWithEmailAndPassword(auth, cleanEmail, tempPass);
+        const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+        await sendSignInLinkToEmail(auth, cleanEmail, {
+          url: `${origin}/?emailSignIn=true&email=${encodeURIComponent(cleanEmail)}`,
+          handleCodeInApp: true
+        });
+        return { success: true };
+      } catch (autoErr: any) {
+        console.warn('[Firebase Auth] Auto-provisioning email link retry error:', autoErr);
+      }
+    }
+
+    return {
+      success: false,
+      code: err?.code,
+      error: err?.message || 'Failed to dispatch official Firebase verification email.'
+    };
+  }
+}
+
+/**
+ * Checks whether the current URL contains a Firebase Email Sign-In link
+ */
+export function isFirebaseEmailSignInLink(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return isSignInWithEmailLink(auth, window.location.href);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verifies the incoming Firebase Email Sign-In Link, exchanges credentials with backend,
+ * and signs in the user.
+ */
+export async function verifyAndCompleteEmailLink(targetEmail?: string): Promise<{
+  success: boolean;
+  user?: any;
+  profile?: any;
+  token?: string;
+  email?: string;
+  error?: string;
+}> {
+  try {
+    if (typeof window === 'undefined') return { success: false, error: 'No browser context' };
+
+    const currentUrl = window.location.href;
+    if (!isSignInWithEmailLink(auth, currentUrl)) {
+      return { success: false, error: 'Current URL is not a Firebase sign-in email link.' };
+    }
+
+    // Retrieve email from argument, search params, or localStorage
+    const urlParams = new URLSearchParams(window.location.search);
+    let email = targetEmail || urlParams.get('email') || window.localStorage.getItem('emailForSignIn') || '';
+
+    if (!email) {
+      return {
+        success: false,
+        error: 'Please confirm the Gmail address you registered with to complete sign-in.'
+      };
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const result = await signInWithEmailLink(auth, cleanEmail, currentUrl);
+    window.localStorage.removeItem('emailForSignIn');
+
+    const idToken = await result.user.getIdToken();
+
+    // Exchange with backend session
+    const response = await fetch('/api/auth/firebase-email-link-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: cleanEmail,
+        uid: result.user.uid,
+        idToken
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      return {
+        success: false,
+        error: data.error || 'Failed to authenticate email link with Barangay E-Services backend.'
+      };
+    }
+
+    // Clean up query parameters from browser URL without reloading
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+
+    return {
+      success: true,
+      user: data.user,
+      profile: data.profile,
+      token: data.token,
+      email: cleanEmail
+    };
+  } catch (err: any) {
+    console.error('[Firebase Auth] verifyAndCompleteEmailLink error:', err);
+    return {
+      success: false,
+      error: err?.message || 'Failed to verify email sign-in link.'
     };
   }
 }

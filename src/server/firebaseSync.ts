@@ -4,10 +4,18 @@ import {
   doc,
   setDoc,
   collection,
-  getDocs
+  getDocs,
+  setLogLevel
 } from 'firebase/firestore';
 import fs from 'fs';
 import path from 'path';
+
+// Suppress internal Firebase Firestore SDK gRPC log messages (e.g. idle stream disconnects)
+try {
+  setLogLevel('silent');
+} catch {
+  // ignore
+}
 
 let dbInstance: any = null;
 let isConfigured = false;
@@ -295,9 +303,13 @@ export async function syncMfaDispatchToFirestore(data: {
       read: false,
       createdAt: new Date().toISOString()
     });
-    console.info(`[Firebase Sync] Dispatched MFA code for '${data.username}' recorded in Firestore (${dispatchId})`);
-  } catch (err) {
-    console.error('[Firebase Sync] Error syncing MFA dispatch:', err);
+    console.info(`[Firebase Sync] Dispatched MFA code [${data.otpCode}] for '${data.username}' recorded in Firestore (/mfaDispatches & /notifications)`);
+  } catch (err: any) {
+    if (err?.code === 'permission-denied' || err?.message?.includes('PERMISSION_DENIED')) {
+      console.info('[Firebase Sync] Note: Firestore security rules limited direct remote write.');
+    } else {
+      console.warn('[Firebase Sync] MFA dispatch record notice:', err?.message || err);
+    }
   }
 }
 
