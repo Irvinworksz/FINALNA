@@ -4,11 +4,12 @@ import {
   HelpCircle, UploadCloud, X, Check, Mail, Phone,
   MapPin, Shield, ArrowRight, RefreshCw, KeyRound, UserPlus,
   LogIn, FileText, Clipboard, Sliders, Settings, Info, Copy, Edit3,
-  ExternalLink, ShieldCheck
+  ExternalLink, ShieldCheck, Clock
 } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
 import { GmailSmtpModal } from './GmailSmtpModal';
+import { OtpMailerModal } from './OtpMailerModal';
 import { PasswordStrengthMeter } from './PasswordStrengthMeter';
 import { 
   signInWithGoogleFirebase, 
@@ -94,14 +95,17 @@ export const SignInPage: React.FC<SignInPageProps> = ({
   const [resendCooldown, setResendCooldown] = useState<number>(0);
   const [customDestinationEmail, setCustomDestinationEmail] = useState<string>('');
   const [showGmailSmtp, setShowGmailSmtp] = useState<boolean>(false);
+  const [showOtpMailer, setShowOtpMailer] = useState<boolean>(false);
   const [showPhoneEdit, setShowPhoneEdit] = useState<boolean>(false);
   const [newPhoneInput, setNewPhoneInput] = useState<string>('');
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
+  const [otpExpirySeconds, setOtpExpirySeconds] = useState<number>(300);
   const [mfaTargetUser, setMfaTargetUser] = useState<{
     id: string;
     username: string;
     role: string;
     fullName: string;
+    challengeId?: string;
     email?: string;
     maskedEmail?: string;
     phoneNumber?: string;
@@ -317,7 +321,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Resend cooldown timer for SMS OTP
+  // Resend cooldown timer for OTP
   useEffect(() => {
     let timer: any;
     if (resendCooldown > 0) {
@@ -327,6 +331,17 @@ export const SignInPage: React.FC<SignInPageProps> = ({
     }
     return () => clearInterval(timer);
   }, [resendCooldown]);
+
+  // 5-minute OTP expiration countdown timer
+  useEffect(() => {
+    let timer: any;
+    if (mfaChallengeActive && otpExpirySeconds > 0) {
+      timer = setInterval(() => {
+        setOtpExpirySeconds((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [mfaChallengeActive, otpExpirySeconds]);
 
   const handleResetChallenge = () => {
     setMfaChallengeActive(false);
@@ -499,7 +514,16 @@ export const SignInPage: React.FC<SignInPageProps> = ({
         }
         onAuthSuccess(res.user, res.profile);
       } else {
-        setErrorMsg(res.error || 'Registration failed. Please check your details.');
+        const errorText = res.error || 'Registration failed. Please check your details.';
+        if (
+          errorText.toLowerCase().includes('already registered') ||
+          errorText.toLowerCase().includes('already in use') ||
+          errorText.toLowerCase().includes('already used')
+        ) {
+          setErrorMsg('This email address is already registered. Please sign in or reset your password.');
+        } else {
+          setErrorMsg(errorText);
+        }
       }
       return;
     }
@@ -522,6 +546,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
 
           // Finalize session with barangay backend
           const res = await apiClient.verifyMfa({
+            challengeId: mfaTargetUser?.challengeId,
             username: mfaTargetUser?.username || username,
             userId: mfaTargetUser?.id,
             firebaseSmsVerified: true,
@@ -550,8 +575,9 @@ export const SignInPage: React.FC<SignInPageProps> = ({
         }
       }
 
-      // Email OTP fallback verification:
+      // Email OTP verification:
       const res = await apiClient.verifyMfa({
+        challengeId: mfaTargetUser?.challengeId,
         username: mfaTargetUser?.username || username,
         userId: mfaTargetUser?.id,
         mfaCode: mfaCode.trim()
@@ -583,6 +609,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
       if (res.mfaRequired && !res.user) {
         const target = {
           id: res.userId || '',
+          challengeId: res.challengeId,
           username: res.username || username,
           role: res.role || 'resident',
           fullName: res.fullName || username,
@@ -591,13 +618,14 @@ export const SignInPage: React.FC<SignInPageProps> = ({
           phoneNumber: res.phoneNumber,
           maskedPhone: res.maskedPhone || (res.phoneNumber ? maskPhilippinePhoneNumber(res.phoneNumber) : ''),
           mfaType: res.mfaType || 'gmail',
-          demoOtp: res.demoOtp,
           emailDelivered: res.emailDelivered,
           emailError: res.emailError
         };
         setMfaChallengeActive(true);
         setMfaTargetUser(target);
-        setMfaCode(res.demoOtp || '');
+        setMfaCode('');
+        setOtpExpirySeconds(res.expiresInSeconds || 300);
+        setResendCooldown(60);
 
         setMfaMode('email');
         const userEmail = target.email || (cleanUser.includes('@') ? cleanUser : null);
@@ -608,7 +636,11 @@ export const SignInPage: React.FC<SignInPageProps> = ({
             }
           }).catch(console.warn);
         }
-        setResetSuccessMsg(`Official Google 2-Factor verification link sent to your registered Gmail (${userEmail || target.maskedEmail})! Check your inbox or enter code below.`);
+        setResetSuccessMsg(
+          res.emailDelivered
+            ? `A 6-digit verification code was sent to your registered Gmail (${userEmail || target.maskedEmail}). Please check your inbox or spam folder.`
+            : `2-Factor verification required. A 6-digit code has been generated for ${userEmail || target.maskedEmail}.`
+        );
       } else if (res.user) {
         onAuthSuccess(res.user, res.user.role === 'resident' ? res.profile : undefined);
       }
@@ -634,17 +666,19 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                 setMfaChallengeActive(true);
                 setMfaTargetUser({
                   id: syncRes.userId || '',
+                  challengeId: syncRes.challengeId,
                   username: syncRes.username || username,
                   role: syncRes.role || 'resident',
                   fullName: syncRes.fullName || username,
                   email: syncRes.email,
                   maskedEmail: syncRes.maskedEmail || `${username}@gmail.com`,
                   mfaType: 'gmail',
-                  demoOtp: syncRes.demoOtp,
                   emailDelivered: syncRes.emailDelivered,
                   emailError: syncRes.emailError
                 });
-                setMfaCode(syncRes.demoOtp || '');
+                setMfaCode('');
+                setOtpExpirySeconds(syncRes.expiresInSeconds || 300);
+                setResendCooldown(60);
                 const userEmail = syncRes.email || (cleanUser.includes('@') ? cleanUser : null);
                 if (userEmail && userEmail.includes('@')) {
                   sendFirebaseSignInEmailLink(userEmail).then((linkRes) => {
@@ -653,7 +687,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                     }
                   }).catch(console.warn);
                 }
-                setResetSuccessMsg(`New password verified! Official Google sign-in verification link sent to your registered Gmail (${userEmail || syncRes.maskedEmail}).`);
+                setResetSuccessMsg(`New password verified! 6-digit security code sent to your registered Gmail (${userEmail || syncRes.maskedEmail}).`);
                 return;
               } else if (syncRes.user && syncRes.token) {
                 setResetSuccessMsg('New Firebase reset password verified! Your portal account has been synchronized successfully.');
@@ -729,28 +763,34 @@ export const SignInPage: React.FC<SignInPageProps> = ({
       return;
     }
 
+    if (resendCooldown > 0) return;
+
     setLoading(true);
     setErrorMsg('');
     const emailToSend = customDestinationEmail.trim() ? customDestinationEmail.trim() : undefined;
     const res = await apiClient.resendMfaOtp({
+      challengeId: mfaTargetUser.challengeId,
       userId: mfaTargetUser.id,
       username: mfaTargetUser.username,
       destinationEmail: emailToSend
     });
     setLoading(false);
     if (res.success) {
+      setResendCooldown(60);
+      setOtpExpirySeconds(res.expiresInSeconds || 300);
       setMfaTargetUser({
         ...mfaTargetUser,
+        challengeId: res.challengeId || mfaTargetUser.challengeId,
         email: res.email,
         maskedEmail: res.maskedEmail,
         emailDelivered: res.emailDelivered,
         emailError: res.emailError
       });
-      setMfaCode(res.demoOtp || '');
+      setMfaCode('');
       setResetSuccessMsg(
         res.emailDelivered
-          ? `A fresh 6-digit code was sent to ${res.email || res.maskedEmail}.`
-          : `A fresh 6-digit code has been generated for your Gmail.`
+          ? `A fresh 6-digit code was sent to ${res.email || res.maskedEmail}. Check your Gmail inbox or spam folder.`
+          : `A fresh 6-digit verification code was dispatched for ${res.email || res.maskedEmail}.`
       );
     } else {
       setErrorMsg(res.error || 'Failed to resend verification code.');
@@ -891,6 +931,32 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   <span className="text-[11px] leading-snug font-medium">{errorMsg}</span>
                 </div>
+                {errorMsg.toLowerCase().includes('already registered') && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsRegister(false);
+                        setErrorMsg('');
+                      }}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>Sign In to Existing Account</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForgotPassword(true);
+                        setErrorMsg('');
+                      }}
+                      className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-[11px] font-bold rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Reset Password via Gmail Link</span>
+                    </button>
+                  </div>
+                )}
                 {errorMsg.toLowerCase().includes('not registered') && (
                   <button
                     type="button"
@@ -933,91 +999,83 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                     </p>
                   </div>
                 ) : (
-                  /* SUBCASE 1B: OFFICIAL GMAIL & FIRESTORE 2FA VERIFICATION */
+                  /* SUBCASE 1B: OFFICIAL GMAIL 2FA VERIFICATION */
                   <div className="space-y-3">
-                    {/* Primary Highlighted 6-Digit Verification Code Card */}
-                    {mfaTargetUser?.demoOtp && (
-                      <div className="p-4 bg-gradient-to-br from-emerald-50 via-teal-50 to-blue-50 border-2 border-emerald-400 rounded-2xl shadow-sm space-y-2.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-extrabold text-emerald-950 flex items-center gap-1.5">
-                            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                            <span>Your 2FA Security Verification Code</span>
+                    {/* Security Challenge Card */}
+                    <div className="p-4 bg-gradient-to-br from-blue-50 via-indigo-50/50 to-slate-50 border border-blue-200 rounded-2xl shadow-xs space-y-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-extrabold text-blue-950 flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-blue-600" />
+                          <span>Gmail Two-Factor Authentication</span>
+                        </span>
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-blue-600" />
+                          <span>
+                            {otpExpirySeconds > 0
+                              ? `${Math.floor(otpExpirySeconds / 60)}:${(otpExpirySeconds % 60).toString().padStart(2, '0')}`
+                              : 'Expired'}
                           </span>
-                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 border border-emerald-300">
-                            Cloud Firestore Synced
-                          </span>
-                        </div>
+                        </span>
+                      </div>
 
-                        <div className="text-center py-1">
-                          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block mb-1">
-                            Registered for: {mfaTargetUser.email || mfaTargetUser.maskedEmail}
-                          </span>
-                          <div className="inline-block px-5 py-2 bg-white border-2 border-emerald-300 rounded-2xl shadow-inner">
-                            <span className="font-mono text-3xl font-black tracking-[0.25em] text-emerald-800">
-                              {mfaTargetUser.demoOtp}
-                            </span>
+                      <div className="text-center py-2 px-3 bg-white/90 border border-blue-100 rounded-xl">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block mb-0.5">
+                          Verification Code Dispatched To
+                        </span>
+                        <div className="text-sm font-extrabold font-mono text-slate-800 break-all">
+                          {mfaTargetUser?.email || mfaTargetUser?.maskedEmail}
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-1 leading-snug">
+                          A secure 6-digit one-time code was sent to your registered Gmail address. It expires in 5 minutes.
+                        </p>
+                      </div>
+
+                      {/* Delivery Status Indicator */}
+                      <div className="flex items-center justify-between p-2.5 bg-white/80 rounded-xl border border-slate-200 text-xs">
+                        <div className="flex items-center gap-2">
+                          <Mail className="w-4 h-4 text-blue-600 shrink-0" />
+                          <div>
+                            <div className="font-bold text-slate-800 text-[11px]">
+                              {mfaTargetUser?.emailDelivered ? 'Delivered via SMTP' : 'Direct Email Dispatch'}
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              {mfaTargetUser?.emailDelivered 
+                                ? 'Sent directly to your Gmail inbox'
+                                : 'Check your inbox, spam, or configure Google App Password'}
+                            </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 pt-0.5">
-                          <button
-                            type="button"
-                            onClick={() => setMfaCode(mfaTargetUser.demoOtp || '')}
-                            className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Autofill Code ({mfaTargetUser.demoOtp})</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (mfaTargetUser.demoOtp) {
-                                navigator.clipboard.writeText(mfaTargetUser.demoOtp);
-                                setResetSuccessMsg('6-digit code copied to clipboard!');
-                              }
-                            }}
-                            className="py-2 px-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copy</span>
-                          </button>
-                        </div>
-
-                        <p className="text-[10px] text-slate-600 text-center leading-snug">
-                          Recorded in Firestore <code className="bg-white px-1 py-0.5 rounded font-mono text-blue-800 font-bold border border-slate-200">/mail</code>, <code className="bg-white px-1 py-0.5 rounded font-mono text-blue-800 font-bold border border-slate-200">/emails</code>, & <code className="bg-white px-1 py-0.5 rounded font-mono text-blue-800 font-bold border border-slate-200">/mfaDispatches</code>.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Gmail Dispatch Status Card */}
-                    <div className="p-3 bg-blue-50/90 border border-blue-200 rounded-2xl text-xs space-y-2 text-slate-700">
-                      <div className="font-bold text-slate-900 flex items-center justify-between">
-                        <span className="flex items-center gap-1.5 font-extrabold text-blue-950">
-                          <Mail className="w-4 h-4 text-blue-600" />
-                          <span>Gmail Delivery Status</span>
-                        </span>
-                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full shrink-0 ${
                           mfaTargetUser?.emailDelivered
                             ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                             : 'bg-amber-100 text-amber-800 border border-amber-300'
                         }`}>
-                          {mfaTargetUser?.emailDelivered ? '✓ Delivered to Inbox' : 'SMTP Configuration Needed'}
+                          {mfaTargetUser?.emailDelivered ? '✓ Sent' : 'Config'}
                         </span>
                       </div>
 
-                      <p className="text-[11px] leading-relaxed text-slate-600">
-                        Dispatched to registered Gmail:{' '}
-                        <strong className="text-slate-900 font-extrabold font-mono">
-                          {mfaTargetUser?.email || mfaTargetUser?.maskedEmail}
-                        </strong>.
-                        {!mfaTargetUser?.emailDelivered && (
-                          <span className="block mt-1 text-[10px] text-slate-500">
-                            Note: To deliver emails straight to Gmail inboxes, Firestore requires either the <strong>Firebase "Trigger Email" Extension</strong> (watching the <code className="text-blue-700">/mail</code> collection) or a 16-character <strong>Google App Password</strong>.
+                      {/* In-App OTP Mailer Live Dispatch Button */}
+                      <button
+                        type="button"
+                        onClick={() => setShowOtpMailer(true)}
+                        className="w-full py-2.5 px-3.5 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 hover:from-blue-800 hover:to-indigo-800 text-white rounded-xl text-xs font-extrabold flex items-center justify-between shadow-xs hover:shadow-md transition-all cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-2 w-2 relative">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                           </span>
-                        )}
-                      </p>
+                          <Mail className="w-3.5 h-3.5 text-blue-200 group-hover:scale-110 transition-transform" />
+                          <span>Open Official OTP Mailer</span>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold bg-white/20 text-white px-2 py-0.5 rounded-md">
+                          View Passcode ↗
+                        </span>
+                      </button>
 
-                      <div className="flex items-center gap-2 pt-1">
+                      {/* Quick Action Buttons */}
+                      <div className="flex items-center gap-2 pt-0.5">
                         <a
                           href="https://mail.google.com"
                           target="_blank"
@@ -1025,16 +1083,16 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                           className="flex-1 py-1.5 px-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
                         >
                           <Mail className="w-3.5 h-3.5 text-red-500" />
-                          <span>Open Gmail</span>
+                          <span>Open Gmail Inbox</span>
                           <ExternalLink className="w-3 h-3 opacity-60" />
                         </a>
                         <button
                           type="button"
                           onClick={() => setShowGmailSmtp(true)}
-                          className="py-1.5 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                          className="py-1.5 px-3 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
                         >
-                          <Settings className="w-3.5 h-3.5" />
-                          <span>Configure SMTP</span>
+                          <Settings className="w-3.5 h-3.5 text-slate-600" />
+                          <span>SMTP Settings</span>
                         </button>
                       </div>
                     </div>
@@ -1144,10 +1202,10 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                       <button
                         type="button"
                         onClick={handleResendMfaCode}
-                        disabled={loading}
-                        className="text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer disabled:text-slate-400"
+                        disabled={loading || resendCooldown > 0}
+                        className="text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer disabled:text-slate-400 disabled:no-underline"
                       >
-                        Resend Gmail Code
+                        {resendCooldown > 0 ? `Resend Gmail Code in ${resendCooldown}s` : 'Resend Gmail Code'}
                       </button>
                     )}
 
@@ -2056,6 +2114,27 @@ export const SignInPage: React.FC<SignInPageProps> = ({
           </div>
         </div>
       )}
+
+      {/* Gmail SMTP Configuration Modal */}
+      <GmailSmtpModal
+        isOpen={showGmailSmtp}
+        onClose={() => setShowGmailSmtp(false)}
+        onSuccess={() => {
+          setShowGmailSmtp(false);
+        }}
+      />
+
+      {/* Official In-App OTP Mailer Modal */}
+      <OtpMailerModal
+        isOpen={showOtpMailer}
+        onClose={() => setShowOtpMailer(false)}
+        challengeId={mfaTargetUser?.challengeId}
+        recipientEmail={mfaTargetUser?.email}
+        onFillCode={(code) => {
+          setMfaCode(code);
+        }}
+        onOpenSmtpSettings={() => setShowGmailSmtp(true)}
+      />
     </div>
   );
 };

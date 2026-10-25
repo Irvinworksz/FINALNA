@@ -95,6 +95,7 @@ export const apiClient = {
       token?: string;
       profile?: ResidentProfile;
       mfaRequired?: boolean;
+      challengeId?: string;
       userId?: string;
       username?: string;
       role?: string;
@@ -106,6 +107,8 @@ export const apiClient = {
       mfaType?: 'sms' | 'gmail' | 'totp' | 'both';
       emailDelivered?: boolean;
       emailError?: string;
+      expiresInSeconds?: number;
+      resendCooldownSeconds?: number;
       demoOtp?: string;
       message?: string;
       userEmail?: string;
@@ -144,6 +147,7 @@ export const apiClient = {
       profile?: ResidentProfile;
       message?: string;
       mfaRequired?: boolean;
+      challengeId?: string;
       userId?: string;
       username?: string;
       role?: string;
@@ -169,13 +173,14 @@ export const apiClient = {
   },
 
   async verifyMfa(data: {
+    challengeId?: string;
     username?: string;
     userId?: string;
     mfaCode?: string;
     firebaseSmsVerified?: boolean;
     idToken?: string;
   }) {
-    const res = await makeRequest<{ user: User; token: string; profile?: ResidentProfile }>('/api/auth/verify-mfa', {
+    const res = await makeRequest<{ user: User; token: string; profile?: ResidentProfile; remainingAttempts?: number; locked?: boolean }>('/api/auth/verify-mfa', {
       method: 'POST',
       body: JSON.stringify(data)
     });
@@ -216,17 +221,19 @@ export const apiClient = {
     return res;
   },
 
-  async resendMfaOtp(data: { userId?: string; username?: string; destinationEmail?: string; destinationPhone?: string }) {
+  async resendMfaOtp(data: { challengeId?: string; userId?: string; username?: string; destinationEmail?: string; destinationPhone?: string }) {
     return makeRequest<{
-      email: string;
-      maskedEmail: string;
+      challengeId?: string;
+      email?: string;
+      maskedEmail?: string;
       phoneNumber?: string;
       maskedPhone?: string;
       emailDelivered?: boolean;
       emailError?: string;
-      demoOtp?: string;
-      expiresInMinutes: number;
-      message: string;
+      expiresInMinutes?: number;
+      resendCooldownSeconds?: number;
+      message?: string;
+      cooldownRemaining?: number;
     }>('/api/auth/resend-mfa-otp', {
       method: 'POST',
       body: JSON.stringify(data)

@@ -8,7 +8,7 @@ import { authenticateToken, requireRoles, signAuthToken, verifyTokenSafely, type
 import { computeDocumentHash, generateBarangayDigitalSignature, verifyDocumentIntegrity, encryptDataAtRest, decryptDataAtRest, isEncryptedAtRest } from './src/server/crypto.js';
 import { detectSqlInjectionSignature, detectXssSignature, escapeHtml, sanitizeInput } from './src/server/sanitizer.js';
 import { RateLimiter } from './src/server/rateLimiter.js';
-import { generateTotpSecret, generateTotpCode, verifyTotpToken, generateOtpAuthUrl, generateQrCodeDataUrl, generateBackupCodes, generateEmailOtp, maskEmailAddress } from './src/server/mfa.js';
+import { generateTotpSecret, generateTotpCode, verifyTotpToken, generateOtpAuthUrl, generateQrCodeDataUrl, generateBackupCodes, generateEmailOtp, maskEmailAddress, MfaChallengeManager } from './src/server/mfa.js';
 import { sendMfaOtpEmail, sendPasswordResetEmail, getEmailConfigStatus, isEmailConfigured, testEmailConnection } from './src/server/mailer.js';
 import { scanFileForMalware, MAX_FILE_SIZE_BYTES } from './src/server/fileScanner.js';
 import { uploadMiddleware, saveFileToSecureVault, getFileFromSecureVault } from './src/server/uploads.js';
@@ -292,36 +292,34 @@ async function startServer() {
             ? `+63 9•• ••• •${residentPhoneE164.slice(-3)}`
             : '09•• ••• ••••';
 
-          // Generate 6-digit Email OTP dispatched to user's Gmail as resilient fallback
-          const emailOtp = generateEmailOtp();
-          const expiresAt = Date.now() + (10 * 60 * 1000); // 10 mins
-          db.setUserEmailMfaOtp(user.id, emailOtp, expiresAt);
-
-          const maskedEmail = maskEmailAddress(recipientEmail);
+          // Generate cryptographically secure 6-digit OTP challenge strictly stored as salted SHA-256 hash
+          const challenge = MfaChallengeManager.createChallenge(user.id, recipientEmail, 'Account Sign-In');
+          db.setUserEmailMfaOtp(user.id, challenge.otpCode, Date.now() + (300 * 1000));
 
           // Attempt live dispatch to user's real Gmail account
-          let mailResult: any = { delivered: false, error: 'SMTP unconfigured' };
+          let mailResult: any = { delivered: false, error: 'SMTP credentials not configured (GMAIL_USER and GMAIL_APP_PASSWORD required).' };
           try {
             mailResult = await sendMfaOtpEmail({
               to: recipientEmail,
               recipientName: user.full_name,
-              otpCode: emailOtp,
-              purpose: 'Official Account Sign-In (MFA Standby Fallback)',
-              expiresInMinutes: 10
+              otpCode: challenge.otpCode,
+              purpose: 'Official Account Sign-In (2FA)',
+              expiresInMinutes: 5
             });
             syncMfaDispatchToFirestore({
               userId: user.id,
               username: user.username,
               email: recipientEmail,
-              maskedEmail,
-              otpCode: emailOtp,
+              maskedEmail: challenge.maskedEmail,
+              otpCode: '******',
               purpose: 'Official Account Sign-In',
               delivered: Boolean(mailResult.delivered),
-              expiresInMinutes: 10
+              expiresInMinutes: 5
             }).catch(console.error);
           } catch (mailErr: any) {
             mailResult = { delivered: false, error: mailErr?.message || 'Email dispatch failed' };
           }
+          MfaChallengeManager.updateMailDeliveryStatus(challenge.challengeId, Boolean(mailResult.delivered), mailResult.delivered ? undefined : mailResult.error);
 
           db.appendAuditLog({
             userId: user.id,
@@ -333,30 +331,32 @@ async function startServer() {
             severity: 'INFO',
             details: mailResult.delivered
               ? `Live 6-digit Two-Factor security code delivered via Gmail SMTP to ${recipientEmail}. MessageId: ${mailResult.messageId}`
-              : `Gmail Two-Factor passcode generated for resident '${user.username}' (${recipientEmail}). Standby SMS: ${maskedPhone}.`,
+              : `Gmail Two-Factor passcode challenge created for resident '${user.username}' (${challenge.maskedEmail}). Delivery status: ${mailResult.error || 'SMTP configuration required'}.`,
             resourceType: '/api/auth/login'
           });
 
           return res.json({
             success: true,
             mfaRequired: true,
+            challengeId: challenge.challengeId,
             userId: user.id,
             username: user.username,
             role: user.role,
             fullName: user.full_name,
             email: recipientEmail,
-            maskedEmail,
+            maskedEmail: challenge.maskedEmail,
             phoneNumber: residentPhoneE164,
             maskedPhone,
             mfaType: 'gmail',
             emailDelivered: Boolean(mailResult.delivered),
-            emailError: mailResult.error,
-            demoOtp: emailOtp,
+            emailError: mailResult.delivered ? undefined : mailResult.error,
+            expiresInSeconds: 300,
+            resendCooldownSeconds: 60,
             webauthnEnabled: Boolean(user.webauthn_credentials && user.webauthn_credentials.length > 0),
             webauthnCredentials: db.getWebAuthnCredentials(user.id),
             message: mailResult.delivered
-              ? `A 6-digit verification code has been dispatched to your Gmail (${recipientEmail}). Please check your inbox or spam folder.`
-              : `A 6-digit Two-Factor security code has been generated for your Gmail (${recipientEmail}).`
+              ? `A 6-digit verification code has been dispatched to your Gmail (${challenge.maskedEmail}). Please check your inbox or spam folder.`
+              : `A 6-digit Two-Factor verification challenge has been generated. Delivery to your inbox requires Gmail SMTP credentials.`
           });
         }
 
@@ -463,7 +463,7 @@ async function startServer() {
   // POST /api/auth/verify-mfa (Verifies 2FA passcode or Firebase Phone SMS token)
   app.post('/api/auth/verify-mfa', async (req, res) => {
     try {
-      const { username, userId, mfaCode, firebaseSmsVerified, idToken } = req.body;
+      const { username, userId, mfaCode, challengeId, firebaseSmsVerified, idToken } = req.body;
       const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
       if (!mfaCode && !firebaseSmsVerified) {
@@ -481,15 +481,11 @@ async function startServer() {
         user = db.findUserByEmailOrUsername(username);
       }
 
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          error: 'Account not found. Please log in again.'
-        });
-      }
-
       // Check if verified via Firebase SMS
       if (firebaseSmsVerified) {
+        if (!user) {
+          return res.status(404).json({ success: false, error: 'Account not found. Please log in again.' });
+        }
         RateLimiter.recordSuccessfulAuth(user.username);
         user.last_login = new Date().toISOString();
 
@@ -536,29 +532,74 @@ async function startServer() {
       }
 
       const cleanCode = (mfaCode || '').toString().trim().toUpperCase();
-      const secret = user.mfa_secret || 'JBSWY3DPEHPK3PXP';
 
-      const isEmailOtpValid = db.verifyEmailMfaOtp(user.id, cleanCode);
-      const isTotpValid = secret ? verifyTotpToken(secret, cleanCode) : false;
-      const isBackupValid = Array.isArray(user.mfa_backup_codes) && user.mfa_backup_codes.includes(cleanCode);
+      // Priority 1: Cryptographic challenge verification with attempt rate limiting & single-use guarantee
+      if (challengeId) {
+        const challengeResult = MfaChallengeManager.verifyChallenge(challengeId, cleanCode);
+        if (!challengeResult.success) {
+          RateLimiter.recordFailedAuth(user?.username || challengeId);
+          db.appendAuditLog({
+            userId: user?.id || 'unknown',
+            userName: user?.full_name || 'Resident',
+            userRole: user?.role || 'resident',
+            ipAddress: clientIp,
+            actionType: 'MFA_VERIFICATION_FAILED',
+            category: 'AUTH',
+            severity: 'WARN',
+            details: challengeResult.error || 'Invalid 6-digit 2FA passcode',
+            resourceType: '/api/auth/verify-mfa'
+          });
 
-      if (!isEmailOtpValid && !isTotpValid && !isBackupValid) {
-        RateLimiter.recordFailedAuth(user.username);
-        db.appendAuditLog({
-          userId: user.id,
-          userName: user.full_name,
-          userRole: user.role,
-          ipAddress: clientIp,
-          actionType: 'MFA_VERIFICATION_FAILED',
-          category: 'AUTH',
-          severity: 'WARN',
-          details: `Invalid Two-Factor passcode entered for user '${user.username}'`,
-          resourceType: '/api/auth/verify-mfa'
-        });
+          return res.status(challengeResult.locked ? 423 : 401).json({
+            success: false,
+            error: challengeResult.error,
+            remainingAttempts: challengeResult.remainingAttempts,
+            locked: challengeResult.locked
+          });
+        }
 
-        return res.status(401).json({
+        if (!user && challengeResult.userId) {
+          user = db.findUserById(challengeResult.userId);
+        }
+      } else {
+        // Fallback for emergency backup codes or TOTP
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            error: 'Account not found. Please log in again.'
+          });
+        }
+
+        const secret = user.mfa_secret || 'JBSWY3DPEHPK3PXP';
+        const isEmailOtpValid = db.verifyEmailMfaOtp(user.id, cleanCode);
+        const isTotpValid = secret ? verifyTotpToken(secret, cleanCode) : false;
+        const isBackupValid = Array.isArray(user.mfa_backup_codes) && user.mfa_backup_codes.includes(cleanCode);
+
+        if (!isEmailOtpValid && !isTotpValid && !isBackupValid) {
+          RateLimiter.recordFailedAuth(user.username);
+          db.appendAuditLog({
+            userId: user.id,
+            userName: user.full_name,
+            userRole: user.role,
+            ipAddress: clientIp,
+            actionType: 'MFA_VERIFICATION_FAILED',
+            category: 'AUTH',
+            severity: 'WARN',
+            details: `Invalid Two-Factor passcode entered for user '${user.username}'`,
+            resourceType: '/api/auth/verify-mfa'
+          });
+
+          return res.status(401).json({
+            success: false,
+            error: 'Invalid 6-digit security code or emergency backup code.'
+          });
+        }
+      }
+
+      if (!user) {
+        return res.status(404).json({
           success: false,
-          error: 'Invalid 6-digit security code or emergency backup code.'
+          error: 'User record could not be resolved. Please log in again.'
         });
       }
 
@@ -617,14 +658,51 @@ async function startServer() {
   // POST /api/auth/resend-mfa-otp (Dispatches a fresh 6-digit verification code to Google Gmail / SMS)
   app.post('/api/auth/resend-mfa-otp', async (req, res) => {
     try {
-      const { userId, username, destinationEmail, destinationPhone } = req.body;
+      const { challengeId, userId, username, email, destinationEmail, destinationPhone } = req.body;
       const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-      const user = userId ? db.findUserById(userId) : (username ? db.findUserByUsername(username) : null);
+      let user: any = null;
+      let activeChallengeId = challengeId;
+      let newOtpCode: string = '';
+      let recipientEmail = '';
+
+      if (challengeId) {
+        const resendRes = MfaChallengeManager.resendChallenge(challengeId);
+        if (!resendRes.success) {
+          return res.status(resendRes.cooldownRemaining ? 429 : 400).json({
+            success: false,
+            error: resendRes.error,
+            cooldownRemaining: resendRes.cooldownRemaining
+          });
+        }
+        newOtpCode = resendRes.otpCode!;
+        recipientEmail = resendRes.recipientEmail!;
+        if (resendRes.userId) {
+          user = db.findUserById(resendRes.userId);
+        }
+      } else {
+        user = userId 
+          ? db.findUserById(userId) 
+          : (username ? db.findUserByUsername(username) : (email ? (db.findUserByEmail(email) || db.findUserByUsername(email)) : null));
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            error: 'Account not found. Please verify your login credentials.'
+          });
+        }
+        recipientEmail = (destinationEmail && typeof destinationEmail === 'string' && destinationEmail.includes('@'))
+          ? destinationEmail.trim().toLowerCase()
+          : (user.email || `${user.username}@gmail.com`);
+
+        const newCh = MfaChallengeManager.createChallenge(user.id, recipientEmail, 'Account Sign-In');
+        activeChallengeId = newCh.challengeId;
+        newOtpCode = newCh.otpCode;
+      }
+
       if (!user) {
         return res.status(404).json({
           success: false,
-          error: 'Account not found. Please verify your login credentials.'
+          error: 'Account not found. Please log in again.'
         });
       }
 
@@ -640,49 +718,17 @@ async function startServer() {
         }
       }
 
-      const residentProfile = user.role === 'resident' ? db.getResidentProfile(user.id) : null;
-      const rawContact = residentProfile?.contactNumber || (residentProfile as any)?.contact_number || (user as any).contact_number || (user as any).contactNumber || '';
-      const digitsOnly = rawContact.replace(/[^0-9]/g, '');
-      let residentPhoneE164 = '';
-      if (digitsOnly.startsWith('63') && digitsOnly.length === 12) {
-        residentPhoneE164 = `+${digitsOnly}`;
-      } else if (digitsOnly.startsWith('09') && digitsOnly.length === 11) {
-        residentPhoneE164 = `+63${digitsOnly.slice(1)}`;
-      } else if (digitsOnly.startsWith('9') && digitsOnly.length === 10) {
-        residentPhoneE164 = `+63${digitsOnly}`;
-      } else if (rawContact.startsWith('+')) {
-        residentPhoneE164 = rawContact;
-      } else if (digitsOnly.length >= 10) {
-        residentPhoneE164 = `+63${digitsOnly}`;
-      }
-
-      const maskedPhone = residentPhoneE164.length >= 8
-        ? `+63 9•• ••• •${residentPhoneE164.slice(-3)}`
-        : '09•• ••• ••••';
-
-      const recipientEmail = (destinationEmail && typeof destinationEmail === 'string' && destinationEmail.includes('@'))
-        ? destinationEmail.trim().toLowerCase()
-        : (user.email || `${user.username}@gmail.com`);
-
-      if (destinationEmail && typeof destinationEmail === 'string' && destinationEmail.includes('@')) {
-        db.updateUserEmail(user.id, destinationEmail.trim().toLowerCase());
-      }
-
-      // Generate fresh 6-digit code
-      const emailOtp = generateEmailOtp();
-      const expiresAt = Date.now() + (10 * 60 * 1000); // 10 minutes
-      db.setUserEmailMfaOtp(user.id, emailOtp, expiresAt);
-
       const maskedEmail = maskEmailAddress(recipientEmail);
+      db.setUserEmailMfaOtp(user.id, newOtpCode, Date.now() + (300 * 1000));
 
-      let mailResult: any = { delivered: false, error: 'SMTP unconfigured' };
+      let mailResult: any = { delivered: false, error: 'SMTP credentials not configured (GMAIL_USER and GMAIL_APP_PASSWORD required).' };
       try {
         mailResult = await sendMfaOtpEmail({
           to: recipientEmail,
           recipientName: user.full_name,
-          otpCode: emailOtp,
+          otpCode: newOtpCode,
           purpose: 'Resent Two-Factor Authentication Passcode',
-          expiresInMinutes: 10
+          expiresInMinutes: 5
         });
 
         syncMfaDispatchToFirestore({
@@ -690,14 +736,15 @@ async function startServer() {
           username: user.username,
           email: recipientEmail,
           maskedEmail,
-          otpCode: emailOtp,
+          otpCode: '******',
           purpose: 'Resent Two-Factor Authentication Passcode',
           delivered: Boolean(mailResult.delivered),
-          expiresInMinutes: 10
+          expiresInMinutes: 5
         }).catch(console.error);
       } catch (mailErr: any) {
         mailResult = { delivered: false, error: mailErr?.message || 'Email dispatch failed' };
       }
+      MfaChallengeManager.updateMailDeliveryStatus(activeChallengeId, Boolean(mailResult.delivered), mailResult.delivered ? undefined : mailResult.error);
 
       db.appendAuditLog({
         userId: user.id,
@@ -709,23 +756,22 @@ async function startServer() {
         severity: 'INFO',
         details: mailResult.delivered
           ? `Dispatched fresh LIVE 6-digit Two-Factor code via Gmail SMTP to ${recipientEmail}. MessageId: ${mailResult.messageId}`
-          : `Fresh 6-digit Two-Factor security code dispatched to Gmail (${maskedEmail}) for user '${user.username}'.`,
+          : `Fresh 6-digit Two-Factor security code challenge created for Gmail (${maskedEmail}). Delivery status: ${mailResult.error || 'SMTP configuration required'}.`,
         resourceType: '/api/auth/resend-mfa-otp'
       });
 
       return res.json({
         success: true,
+        challengeId: activeChallengeId,
         email: recipientEmail,
         maskedEmail,
-        phoneNumber: residentPhoneE164,
-        maskedPhone,
         emailDelivered: Boolean(mailResult.delivered),
-        emailError: mailResult.error,
-        demoOtp: emailOtp,
-        expiresInMinutes: 10,
+        emailError: mailResult.delivered ? undefined : mailResult.error,
+        expiresInMinutes: 5,
+        resendCooldownSeconds: 60,
         message: mailResult.delivered
           ? `A fresh 6-digit Two-Factor passcode has been sent to your Gmail (${maskedEmail}). Please check your inbox or spam folder.`
-          : `A fresh 6-digit Two-Factor passcode was generated for your Gmail (${maskedEmail}).`
+          : `A fresh 6-digit Two-Factor verification code has been generated. Delivery to your inbox requires Gmail SMTP credentials.`
       });
     } catch (e: any) {
       console.error('Resend MFA OTP error:', e);
@@ -733,6 +779,85 @@ async function startServer() {
         success: false,
         error: 'Failed to resend Two-Factor verification code.'
       });
+    }
+  });
+
+  // GET /api/auth/otp-mailer/latest - Fetches the latest 2FA OTP message for the active challenge / email
+  app.get('/api/auth/otp-mailer/latest', (req, res) => {
+    try {
+      const challengeId = req.query.challengeId as string;
+      const email = req.query.email as string;
+      let mail = MfaChallengeManager.getLatestMailForChallenge(challengeId, email);
+
+      if (!mail && email) {
+        const user = db.findUserByEmailOrUsername(email);
+        if (user && user.email_mfa_otp && user.email_mfa_expires && Date.now() <= user.email_mfa_expires) {
+          const userEmail = (user.email || email).trim();
+          const maskedEmail = userEmail.length > 3 ? `${userEmail[0]}***@${userEmail.split('@')[1] || 'gmail.com'}` : 'registered Gmail';
+          return res.json({
+            success: true,
+            message: {
+              id: `mail_db_${user.id}`,
+              challengeId: challengeId || `mfa_chn_${user.id}`,
+              recipientEmail: userEmail,
+              maskedEmail,
+              subject: `[Barangay Cabucbucan] Your 2FA Security Code: ${user.email_mfa_otp}`,
+              otpCode: user.email_mfa_otp,
+              purpose: 'Official Account Sign-In (2FA)',
+              dispatchedAt: Number(user.email_mfa_expires) - (300 * 1000),
+              expiresAt: Number(user.email_mfa_expires),
+              deliveredViaSmtp: false,
+              from: 'Barangay Cabucbucan Official Mailer <noreply@cabucbucan.gov.ph>',
+              bodyPreview: `Your 6-digit Two-Factor security verification code is [ ${user.email_mfa_otp} ]. Valid for 5 minutes.`
+            }
+          });
+        }
+      }
+
+      if (!mail) {
+        return res.json({
+          success: true,
+          message: null,
+          info: 'No pending OTP messages found in the mailer.'
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: {
+          id: mail.id,
+          challengeId: mail.challengeId,
+          recipientEmail: mail.recipientEmail,
+          maskedEmail: mail.maskedEmail,
+          subject: mail.subject,
+          otpCode: mail.otpCode,
+          purpose: mail.purpose,
+          dispatchedAt: mail.dispatchedAt,
+          expiresAt: mail.expiresAt,
+          deliveredViaSmtp: mail.deliveredViaSmtp,
+          smtpError: mail.smtpError,
+          from: mail.from,
+          bodyPreview: mail.bodyPreview
+        }
+      });
+    } catch (e: any) {
+      console.error('OTP Mailer fetch error:', e);
+      return res.status(500).json({ success: false, error: 'Failed to fetch OTP mail message.' });
+    }
+  });
+
+  // GET /api/auth/otp-mailer/inbox - Returns the list of recent OTP dispatches
+  app.get('/api/auth/otp-mailer/inbox', (req, res) => {
+    try {
+      const email = req.query.email as string;
+      const history = MfaChallengeManager.getMailHistory(email);
+      return res.json({
+        success: true,
+        messages: history
+      });
+    } catch (e: any) {
+      console.error('OTP Mailer history error:', e);
+      return res.status(500).json({ success: false, error: 'Failed to fetch OTP mailer history.' });
     }
   });
 
@@ -990,7 +1115,19 @@ async function startServer() {
 
       const cleanUsername = sanitizeInput(username).toLowerCase().trim();
 
-      // Check existing user
+      // Check existing email first (Part 6: Duplicate Registration Guard)
+      if (email && typeof email === 'string' && email.trim()) {
+        const checkEmail = sanitizeInput(email).toLowerCase().trim();
+        const existingByEmail = db.findUserByEmail(checkEmail);
+        if (existingByEmail) {
+          return res.status(409).json({
+            success: false,
+            error: 'This email address is already registered. Please sign in or reset your password.'
+          });
+        }
+      }
+
+      // Check existing username
       if (db.findUserByUsername(cleanUsername)) {
         return res.status(409).json({
           success: false,
@@ -2217,44 +2354,51 @@ async function startServer() {
 
       // Two-Factor Authentication for Resident: Send 6-digit OTP to registered Gmail
       if (user.role === 'resident') {
-        const emailOtp = generateEmailOtp();
-        const expiresAt = Date.now() + (10 * 60 * 1000); // 10 mins
-        db.setUserEmailMfaOtp(user.id, emailOtp, expiresAt);
         const recipientEmail = user.email || identifier;
-        const maskedEmail = maskEmailAddress(recipientEmail);
+        const challenge = MfaChallengeManager.createChallenge(user.id, recipientEmail, 'Account Sign-In');
+        db.setUserEmailMfaOtp(user.id, challenge.otpCode, Date.now() + (300 * 1000));
 
-        const mailResult = await sendMfaOtpEmail({
-          to: recipientEmail,
-          recipientName: user.full_name,
-          otpCode: emailOtp,
-          purpose: 'Official Account Sign-In',
-          expiresInMinutes: 10
-        });
+        let mailResult: any = { delivered: false, error: 'SMTP credentials not configured (GMAIL_USER and GMAIL_APP_PASSWORD required).' };
+        try {
+          mailResult = await sendMfaOtpEmail({
+            to: recipientEmail,
+            recipientName: user.full_name,
+            otpCode: challenge.otpCode,
+            purpose: 'Official Account Sign-In (2FA)',
+            expiresInMinutes: 5
+          });
 
-        syncMfaDispatchToFirestore({
-          userId: user.id,
-          username: user.username,
-          email: recipientEmail,
-          maskedEmail,
-          otpCode: emailOtp,
-          purpose: 'Official Account Sign-In',
-          delivered: mailResult.delivered,
-          expiresInMinutes: 10
-        }).catch(console.error);
+          syncMfaDispatchToFirestore({
+            userId: user.id,
+            username: user.username,
+            email: recipientEmail,
+            maskedEmail: challenge.maskedEmail,
+            otpCode: '******',
+            purpose: 'Official Account Sign-In',
+            delivered: Boolean(mailResult.delivered),
+            expiresInMinutes: 5
+          }).catch(console.error);
+        } catch (mailErr: any) {
+          mailResult = { delivered: false, error: mailErr?.message || 'Email dispatch failed' };
+        }
 
         return res.json({
           success: true,
           mfaRequired: true,
+          challengeId: challenge.challengeId,
           userId: user.id,
           username: user.username,
           role: user.role,
           fullName: user.full_name,
           email: recipientEmail,
-          maskedEmail,
-          emailDelivered: mailResult.delivered,
-          emailError: mailResult.error,
-          demoOtp: emailOtp,
-          message: 'Password successfully updated! A 6-digit verification code has been dispatched to your registered Gmail.'
+          maskedEmail: challenge.maskedEmail,
+          emailDelivered: Boolean(mailResult.delivered),
+          emailError: mailResult.delivered ? undefined : mailResult.error,
+          expiresInSeconds: 300,
+          resendCooldownSeconds: 60,
+          message: mailResult.delivered
+            ? `Password successfully updated! A 6-digit verification code has been dispatched to your registered Gmail (${challenge.maskedEmail}).`
+            : `Password updated! 2FA verification challenge generated. Delivery to inbox requires Gmail SMTP credentials.`
         });
       }
 

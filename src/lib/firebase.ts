@@ -31,24 +31,26 @@ try {
 export const auth = app ? getAuth(app) : ({} as any);
 export const db = app ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || '(default)') : ({} as any);
 
-// Validate connection to Firestore on initialization per IAS security checklist
+// Validate connection to Firestore safely without triggering token service errors on unauthenticated boot
 export async function validateFirebaseConnection(): Promise<{ connected: boolean; error?: string }> {
   try {
+    // Only attempt Firestore server ping if a user is actively authenticated
+    if (!auth || !auth.currentUser) {
+      return { connected: true };
+    }
     await getDocFromServer(doc(db, 'test', 'connection'));
     console.info('[Firebase] Firestore real-time cloud connection verified successfully.');
     return { connected: true };
   } catch (error: any) {
-    if (error?.message?.includes('the client is offline')) {
-      console.warn('[Firebase] Client is offline or database initializing.');
-      return { connected: false, error: 'Offline / initializing' };
+    const msg = error?.message || '';
+    if (msg.includes('the client is offline') || msg.includes('token-service-api') || msg.includes('disabled')) {
+      console.warn('[Firebase] Firestore operating in offline/resilient mode.');
+      return { connected: false, error: 'Offline / local mode' };
     }
-    // Document might just not exist, but server responded, meaning connection is live
+    // Document might not exist yet, connection is live
     return { connected: true };
   }
 }
-
-// Initial connectivity ping
-validateFirebaseConnection().catch(() => {});
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({

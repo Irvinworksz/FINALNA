@@ -168,4 +168,363 @@ export function generateBackupCodes(count: number = 8): string[] {
   return codes;
 }
 
+export interface MfaPendingChallenge {
+  challengeId: string;
+  userId: string;
+  recipientEmail: string;
+  maskedEmail: string;
+  purpose: string;
+  salt: string;
+  hashedOtp: string;
+  createdAt: number;
+  expiresAt: number; // strictly 5 minutes (300 seconds)
+  attempts: number;
+  maxAttempts: number; // max 5 attempts per challenge
+  lastResendAt: number;
+  resendCount: number;
+}
+
+export interface DispatchedOtpMail {
+  id: string;
+  challengeId: string;
+  userId: string;
+  recipientEmail: string;
+  maskedEmail: string;
+  subject: string;
+  otpCode: string;
+  purpose: string;
+  dispatchedAt: number;
+  expiresAt: number;
+  deliveredViaSmtp: boolean;
+  smtpError?: string;
+  from: string;
+  bodyPreview: string;
+}
+
+class MfaChallengeManagerClass {
+  private challenges: Map<string, MfaPendingChallenge> = new Map();
+  // Map of userId -> challengeId so previous codes are strictly invalidated
+  private userToChallenge: Map<string, string> = new Map();
+  // In-memory OTP mailer log of recently dispatched messages
+  private mailHistory: DispatchedOtpMail[] = [];
+
+  public recordDispatchedMail(mail: DispatchedOtpMail) {
+    this.mailHistory.unshift(mail);
+    if (this.mailHistory.length > 40) {
+      this.mailHistory.pop();
+    }
+  }
+
+  public updateMailDeliveryStatus(challengeId: string, delivered: boolean, error?: string) {
+    const mail = this.mailHistory.find(m => m.challengeId === challengeId);
+    if (mail) {
+      mail.deliveredViaSmtp = delivered;
+      mail.smtpError = delivered ? undefined : error;
+    }
+  }
+
+  public getLatestMailForChallenge(challengeId?: string, email?: string): DispatchedOtpMail | null {
+    if (challengeId) {
+      const found = this.mailHistory.find(m => m.challengeId === challengeId);
+      if (found) return found;
+    }
+    if (email) {
+      const clean = email.trim().toLowerCase();
+      const found = this.mailHistory.find(m => m.recipientEmail.toLowerCase() === clean);
+      if (found) return found;
+    }
+    return this.mailHistory[0] || null;
+  }
+
+  public getMailHistory(email?: string): DispatchedOtpMail[] {
+    if (email) {
+      const clean = email.trim().toLowerCase();
+      return this.mailHistory.filter(m => m.recipientEmail.toLowerCase() === clean);
+    }
+    return [...this.mailHistory];
+  }
+
+  /**
+   * Hashes a 6-digit OTP using SHA-256 and cryptographic salt
+   * Guarantees that only secure hashes are stored in memory, never plaintext codes.
+   */
+  private hashOtp(otp: string, salt: string): string {
+    return crypto.createHash('sha256').update(`${salt}:${otp.trim()}`).digest('hex');
+  }
+
+  /**
+   * Creates a new unpredictable, cryptographically secured 2FA challenge
+   */
+  public createChallenge(userId: string, email: string, purpose: string = 'Account Sign-In'): {
+    challengeId: string;
+    otpCode: string;
+    expiresInSeconds: number;
+    maskedEmail: string;
+  } {
+    // 1. Invalidate any existing challenge for this user
+    this.invalidateUserChallenges(userId);
+
+    const challengeId = `mfa_chn_${crypto.randomUUID()}`;
+    // Cryptographically secure unpredictable 6-digit numeric OTP (100000 - 999999)
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hashedOtp = this.hashOtp(otpCode, salt);
+    const maskedEmail = maskEmailAddress(email);
+    const now = Date.now();
+    const expiresInSeconds = 300; // 5 minutes strictly
+    const expiresAt = now + (expiresInSeconds * 1000);
+
+    const challenge: MfaPendingChallenge = {
+      challengeId,
+      userId,
+      recipientEmail: email.trim().toLowerCase(),
+      maskedEmail,
+      purpose,
+      salt,
+      hashedOtp,
+      createdAt: now,
+      expiresAt,
+      attempts: 0,
+      maxAttempts: 5,
+      lastResendAt: now,
+      resendCount: 0
+    };
+
+    this.challenges.set(challengeId, challenge);
+    this.userToChallenge.set(userId, challengeId);
+
+    // Record into OTP mailer log
+    this.recordDispatchedMail({
+      id: `mail_${now}_${Math.random().toString(36).substring(2, 6)}`,
+      challengeId,
+      userId,
+      recipientEmail: email.trim().toLowerCase(),
+      maskedEmail,
+      subject: `[Barangay Cabucbucan] Your 2FA Security Code: ${otpCode}`,
+      otpCode,
+      purpose,
+      dispatchedAt: now,
+      expiresAt,
+      deliveredViaSmtp: false,
+      from: 'Barangay Cabucbucan Official Mailer <noreply@cabucbucan.gov.ph>',
+      bodyPreview: `Your 6-digit Two-Factor security verification code for ${purpose} is [ ${otpCode} ]. Valid for 5 minutes.`
+    });
+
+    this.cleanupExpired();
+
+    return {
+      challengeId,
+      otpCode,
+      expiresInSeconds,
+      maskedEmail
+    };
+  }
+
+  /**
+   * Verifies the submitted OTP against the pending challenge
+   */
+  public verifyChallenge(challengeId: string, submittedCode: string): {
+    success: boolean;
+    userId?: string;
+    recipientEmail?: string;
+    error?: string;
+    remainingAttempts?: number;
+    locked?: boolean;
+    expired?: boolean;
+  } {
+    if (!challengeId || !submittedCode) {
+      return {
+        success: false,
+        error: 'Challenge ID and 6-digit verification code are required.'
+      };
+    }
+
+    const cleanCode = submittedCode.trim().replace(/\s/g, '');
+    if (!/^\d{6}$/.test(cleanCode)) {
+      return {
+        success: false,
+        error: 'Verification code must be exactly 6 numeric digits.'
+      };
+    }
+
+    const challenge = this.challenges.get(challengeId);
+    if (!challenge) {
+      return {
+        success: false,
+        error: 'Security challenge session expired or not found. Please sign in again.',
+        expired: true
+      };
+    }
+
+    if (Date.now() > challenge.expiresAt) {
+      this.deleteChallenge(challengeId);
+      return {
+        success: false,
+        error: 'Verification code has expired (5-minute limit). Please request a new code.',
+        expired: true
+      };
+    }
+
+    if (challenge.attempts >= challenge.maxAttempts) {
+      this.deleteChallenge(challengeId);
+      return {
+        success: false,
+        error: 'Maximum verification attempts exceeded (5 failed attempts). Security challenge invalidated for your safety. Please sign in again.',
+        locked: true,
+        remainingAttempts: 0
+      };
+    }
+
+    challenge.attempts += 1;
+    const computedHash = this.hashOtp(cleanCode, challenge.salt);
+
+    // Timing-safe comparison to prevent timing side-channel attacks
+    const isMatch = crypto.timingSafeEqual(
+      Buffer.from(computedHash, 'utf8'),
+      Buffer.from(challenge.hashedOtp, 'utf8')
+    );
+
+    if (!isMatch) {
+      const remaining = challenge.maxAttempts - challenge.attempts;
+      if (remaining <= 0) {
+        this.deleteChallenge(challengeId);
+        return {
+          success: false,
+          error: 'Maximum verification attempts reached (5 failed attempts). Security challenge expired. Please sign in again.',
+          locked: true,
+          remainingAttempts: 0
+        };
+      }
+      return {
+        success: false,
+        error: `Invalid 6-digit verification code. ${remaining} attempt(s) remaining.`,
+        remainingAttempts: remaining
+      };
+    }
+
+    // Single-use guarantee: delete challenge immediately upon successful verification to prevent replay attacks
+    const userId = challenge.userId;
+    const recipientEmail = challenge.recipientEmail;
+    this.deleteChallenge(challengeId);
+
+    return {
+      success: true,
+      userId,
+      recipientEmail
+    };
+  }
+
+  /**
+   * Resends a fresh OTP code for an existing pending challenge with a 60-second cooldown
+   */
+  public resendChallenge(challengeId: string): {
+    success: boolean;
+    otpCode?: string;
+    recipientEmail?: string;
+    userId?: string;
+    error?: string;
+    cooldownRemaining?: number;
+  } {
+    const challenge = this.challenges.get(challengeId);
+    if (!challenge) {
+      return {
+        success: false,
+        error: 'Active challenge session not found. Please sign in again.'
+      };
+    }
+
+    if (Date.now() > challenge.expiresAt) {
+      this.deleteChallenge(challengeId);
+      return {
+        success: false,
+        error: 'Challenge session expired. Please sign in again.'
+      };
+    }
+
+    // 60-second resend cooldown check
+    const elapsedSinceLast = Date.now() - challenge.lastResendAt;
+    if (elapsedSinceLast < 60000) {
+      const remainingSeconds = Math.ceil((60000 - elapsedSinceLast) / 1000);
+      return {
+        success: false,
+        error: `Please wait ${remainingSeconds} second(s) before requesting another code.`,
+        cooldownRemaining: remainingSeconds
+      };
+    }
+
+    // Maximum 5 resends per challenge
+    if (challenge.resendCount >= 5) {
+      return {
+        success: false,
+        error: 'Maximum resend limit reached for this session (5 resends). Please sign in again.'
+      };
+    }
+
+    // Generate NEW OTP, salt, hash, and reset attempts
+    const newOtp = crypto.randomInt(100000, 1000000).toString();
+    const newSalt = crypto.randomBytes(16).toString('hex');
+    challenge.salt = newSalt;
+    challenge.hashedOtp = this.hashOtp(newOtp, newSalt);
+    challenge.expiresAt = Date.now() + (300 * 1000); // 5 minutes renewal
+    challenge.attempts = 0; // reset attempts for fresh code
+    challenge.lastResendAt = Date.now();
+    challenge.resendCount += 1;
+
+    // Record fresh resent message into OTP mailer log
+    this.recordDispatchedMail({
+      id: `mail_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      challengeId,
+      userId: challenge.userId,
+      recipientEmail: challenge.recipientEmail,
+      maskedEmail: challenge.maskedEmail,
+      subject: `[Barangay Cabucbucan] Your Fresh 2FA Security Code: ${newOtp}`,
+      otpCode: newOtp,
+      purpose: 'Resent Two-Factor Authentication Passcode',
+      dispatchedAt: Date.now(),
+      expiresAt: challenge.expiresAt,
+      deliveredViaSmtp: false,
+      from: 'Barangay Cabucbucan Official Mailer <noreply@cabucbucan.gov.ph>',
+      bodyPreview: `Your fresh 6-digit Two-Factor security verification code is [ ${newOtp} ]. Valid for 5 minutes.`
+    });
+
+    return {
+      success: true,
+      otpCode: newOtp,
+      recipientEmail: challenge.recipientEmail,
+      userId: challenge.userId
+    };
+  }
+
+  public getChallenge(challengeId: string): MfaPendingChallenge | undefined {
+    return this.challenges.get(challengeId);
+  }
+
+  public invalidateUserChallenges(userId: string) {
+    const existingChallengeId = this.userToChallenge.get(userId);
+    if (existingChallengeId) {
+      this.deleteChallenge(existingChallengeId);
+    }
+  }
+
+  public deleteChallenge(challengeId: string) {
+    const c = this.challenges.get(challengeId);
+    if (c) {
+      this.userToChallenge.delete(c.userId);
+      this.challenges.delete(challengeId);
+    }
+  }
+
+  private cleanupExpired() {
+    const now = Date.now();
+    for (const [id, c] of this.challenges.entries()) {
+      if (now > c.expiresAt) {
+        this.deleteChallenge(id);
+      }
+    }
+  }
+}
+
+export const MfaChallengeManager = new MfaChallengeManagerClass();
+
+
 

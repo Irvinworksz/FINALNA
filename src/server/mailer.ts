@@ -162,7 +162,7 @@ export async function sendMfaOtpEmail(params: {
   purpose?: string;
   expiresInMinutes?: number;
 }): Promise<EmailSendResult> {
-  const { to, recipientName, otpCode, purpose = 'Account Sign-In', expiresInMinutes = 10 } = params;
+  const { to, recipientName, otpCode, purpose = 'Account Sign-In', expiresInMinutes = 5 } = params;
 
   if (!to || !to.includes('@')) {
     return {
