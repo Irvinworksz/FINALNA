@@ -121,8 +121,8 @@ class ParameterizedDatabase {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed.users)) {
           for (const [id, rawU] of parsed.users) {
-            // Only skip legacy removed seed id if present
-            if (id === 'usr-res-001') {
+            // Skip legacy removed seed ids (including hardcoded Maria Clara Santos)
+            if (id === 'usr-res-001' || id === 'usr-res-002' || rawU.username === 'maria.santos' || rawU.full_name === 'Maria Clara Santos') {
               continue;
             }
             // Decrypt sensitive fields if encrypted with AES-256-GCM
@@ -135,7 +135,7 @@ class ParameterizedDatabase {
         }
         if (Array.isArray(parsed.profiles)) {
           for (const [id, rawP] of parsed.profiles) {
-            if (id === 'usr-res-001' || rawP.userId === 'usr-res-001') {
+            if (id === 'usr-res-001' || id === 'usr-res-002' || rawP.userId === 'usr-res-001' || rawP.userId === 'usr-res-002' || (rawP.firstName === 'Maria' && rawP.lastName === 'Santos')) {
               continue;
             }
             // Decrypt sensitive profile fields
@@ -145,11 +145,8 @@ class ParameterizedDatabase {
         }
         if (Array.isArray(parsed.requests)) {
           for (const [id, r] of parsed.requests) {
-            if (r.residentId === 'usr-res-001') {
-              r.residentId = 'usr-res-002';
-              r.residentName = 'Maria Clara Santos';
-              r.residentAddress = 'Purok 2, Barangay Cabucbucan, Rizal, Nueva Ecija';
-              r.purok = 'Purok 2';
+            if (r.residentId === 'usr-res-001' || r.residentId === 'usr-res-002' || r.residentName === 'Maria Clara Santos') {
+              continue;
             }
             this.requests.set(id, r);
           }
@@ -157,18 +154,17 @@ class ParameterizedDatabase {
         if (Array.isArray(parsed.uploadedDocuments)) {
           for (const [id, rawD] of parsed.uploadedDocuments) {
             const d = decryptRecordFields(rawD, DOCUMENT_ENCRYPTED_FIELDS);
-            if (d.residentId === 'usr-res-001') {
-              d.residentId = 'usr-res-002';
-              d.residentName = 'Maria Clara Santos';
+            if (d.residentId === 'usr-res-001' || d.residentId === 'usr-res-002' || d.residentName === 'Maria Clara Santos') {
+              continue;
             }
             this.uploadedDocuments.set(id, d as UploadedDocument);
           }
         }
         if (Array.isArray(parsed.auditLogs) && parsed.auditLogs.length > 0) {
-          this.auditLogs = parsed.auditLogs;
+          this.auditLogs = parsed.auditLogs.filter((a: any) => a.userId !== 'usr-res-001' && a.userId !== 'usr-res-002' && a.userName !== 'Maria Clara Santos');
         }
         if (Array.isArray(parsed.notifications) && parsed.notifications.length > 0) {
-          this.notifications = parsed.notifications;
+          this.notifications = parsed.notifications.filter((n: any) => n.residentId !== 'usr-res-001' && n.residentId !== 'usr-res-002' && n.residentName !== 'Maria Clara Santos');
         }
         if (parsed.emailSettings) {
           const loadedEmailSettings = { ...parsed.emailSettings };
@@ -201,53 +197,10 @@ class ParameterizedDatabase {
     const officialPass = bcrypt.hashSync('CaptainAuth@2026!', saltRounds);
     const adminPass = bcrypt.hashSync('AdminRoot@2026!', saltRounds);
 
-    const resident2Id = 'usr-res-002';
     const resident3Id = 'usr-res-003';
     const staffId = 'usr-stf-001';
     const officialId = 'usr-off-001';
     const adminId = 'usr-adm-001';
-
-    // Seed Residents & Administrative Personnel
-    this.users.set(resident2Id, {
-      id: resident2Id,
-      username: 'maria.santos',
-      password_hash: residentPass,
-      email: 'maria.santos@gmail.com',
-      role: 'resident',
-      full_name: 'Maria Clara Santos',
-      contact_number: '09289876543',
-      address: 'Purok 2, Barangay Cabucbucan, Rizal, Nueva Ecija',
-      purok: 'Purok 2',
-      is_verified_resident: 1,
-      verification_status: 'verified',
-      verification_remarks: 'Residency verified via UMID ID and Purok 2 Barangay Census record.',
-      reviewed_by: 'Elena Ramos (Desk Officer)',
-      reviewed_at: '2026-02-01T10:00:00Z',
-      id_type: 'Unified Multi-Purpose ID (UMID)',
-      id_number: 'CRN-0111-9876543-2',
-      id_photo_url: generateSampleIdDataUrl('Unified Multi-Purpose ID (UMID)', 'Maria Clara Santos', 'CRN-0111-9876543-2', 'Purok 2'),
-      id_photo_name: 'umid_card_scan.svg',
-      created_at: '2026-02-01T09:15:00Z',
-      last_login: new Date().toISOString(),
-      mfa_enabled: 1,
-      mfa_required: 1,
-      mfa_type: 'gmail',
-      mfa_secret: null,
-      mfa_backup_codes: ['BACKUP-SEC-01', 'BACKUP-SEC-02', '7A12-884B', '33FC-991A'],
-      webauthn_enabled: 1,
-      webauthn_credentials: [
-        {
-          id: 'cred-touchid-maria',
-          credentialId: 'ias-passkey-touchid-demo',
-          counter: 2,
-          deviceName: 'Apple Touch ID / Face ID',
-          deviceType: 'platform',
-          createdAt: '2026-02-02T11:00:00Z',
-          lastUsedAt: '2026-09-09T08:15:00Z',
-          transports: ['internal']
-        }
-      ]
-    });
 
     // Resident 3: Newly Registered Resident Pending Review
     this.users.set(resident3Id, {
@@ -378,34 +331,6 @@ class ParameterizedDatabase {
     });
 
     // Resident Profiles
-    this.profiles.set(resident2Id, {
-      id: 'prof-res-002',
-      userId: resident2Id,
-      firstName: 'Maria',
-      middleName: 'Clara',
-      lastName: 'Santos',
-      suffix: '',
-      birthDate: '1998-11-23',
-      civilStatus: 'Single',
-      gender: 'Female',
-      citizenship: 'Filipino',
-      purokZone: 'Purok 2',
-      streetAddress: 'Purok 2, Barangay Cabucbucan, Rizal, Nueva Ecija',
-      yearsOfResidency: 8,
-      contactNumber: '09289876543',
-      emergencyContact: 'Teresa Santos (Mother) - 09281112233',
-      voterStatus: 'Registered',
-      idType: 'Unified Multi-Purpose ID (UMID)',
-      idNumber: 'CRN-0111-9876543-2',
-      idPhotoUrl: generateSampleIdDataUrl('Unified Multi-Purpose ID (UMID)', 'Maria Clara Santos', 'CRN-0111-9876543-2', 'Purok 2'),
-      idPhotoName: 'umid_card_scan.svg',
-      verificationStatus: 'verified',
-      verificationRemarks: 'Residency verified via UMID ID and Purok 2 Barangay Census record.',
-      reviewedByStaffName: 'Elena Ramos (Desk Officer)',
-      reviewedAt: '2026-02-01T10:00:00Z',
-      createdAt: '2026-02-01T09:20:00Z',
-      updatedAt: '2026-02-01T09:20:00Z'
-    });
 
     this.profiles.set(resident3Id, {
       id: 'prof-res-003',
@@ -434,236 +359,6 @@ class ParameterizedDatabase {
       updatedAt: '2026-09-08T14:25:00Z'
     });
 
-    // Seed Clearance Requests with authentic cryptographic signatures
-    const issuedReqId = 'req-2026-001';
-    const issuedRef = 'BC-2026-0842';
-    const issueDate = '2026-08-15T10:30:00Z';
-    const signatory = 'Hon. Cornelio Laugo (Punong Barangay)';
-
-    const cryptoHash = computeDocumentHash({
-      referenceNumber: issuedRef,
-      residentId: resident2Id,
-      residentName: 'Maria Clara Santos',
-      documentType: 'barangay_clearance',
-      purpose: 'Local Employment Application at BPO Center',
-      issuedAt: issueDate,
-      signatory
-    });
-
-    const sigResult = generateBarangayDigitalSignature(cryptoHash, signatory);
-
-    // Seed Uploaded Document 1 (Maria's PhilSys ID)
-    const doc1Id = 'doc-up-001';
-    this.uploadedDocuments.set(doc1Id, {
-      id: doc1Id,
-      applicationId: issuedReqId,
-      residentId: resident2Id,
-      residentName: 'Maria Clara Santos',
-      originalFilename: 'philsys_national_id_front.jpg',
-      storedFilename: 'sec_doc_001_philsys.dat',
-      mimeType: 'image/jpeg',
-      sizeBytes: 842100,
-      docCategory: 'valid_id',
-      sha256Hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      scanStatus: 'CLEAN',
-      scanDetails: 'IAS Antivirus Engine verified clean. Magic bytes: image/jpeg. No malicious payload detected.',
-      threatsFound: [],
-      storagePathMasked: '[ISOLATED_VAULT_ROOT]/sec_doc_001_philsys.dat',
-      uploadedAt: '2026-08-14T08:50:00Z',
-      downloadUrl: `/api/uploads/${doc1Id}`
-    });
-
-    // Seed Uploaded Document 2 (Maria's UMID Card)
-    const doc2Id = 'doc-up-002';
-    const req2Id = 'req-2026-002';
-    this.uploadedDocuments.set(doc2Id, {
-      id: doc2Id,
-      applicationId: req2Id,
-      residentId: resident2Id,
-      residentName: 'Maria Clara Santos',
-      originalFilename: 'umid_card_scan.pdf',
-      storedFilename: 'sec_doc_002_umid.dat',
-      mimeType: 'application/pdf',
-      sizeBytes: 1245000,
-      docCategory: 'valid_id',
-      sha256Hash: 'a6c98615b39926615b49749174577ef379d46d0a7905ee7a89e9005bc14d6428',
-      scanStatus: 'CLEAN',
-      scanDetails: 'IAS Antivirus Engine verified clean. Magic bytes: application/pdf. 0 threats detected.',
-      threatsFound: [],
-      storagePathMasked: '[ISOLATED_VAULT_ROOT]/sec_doc_002_umid.dat',
-      uploadedAt: '2026-08-20T11:10:00Z',
-      downloadUrl: `/api/uploads/${doc2Id}`
-    });
-
-    this.requests.set(issuedReqId, {
-      id: issuedReqId,
-      referenceNumber: issuedRef,
-      residentId: resident2Id,
-      residentName: 'Maria Clara Santos',
-      residentAddress: 'Purok 2, Barangay Cabucbucan, Rizal, Nueva Ecija',
-      purok: 'Purok 2',
-      documentType: 'barangay_clearance',
-      purpose: 'Local Employment Application at Central Luzon Logistics Center',
-      urgency: 'standard',
-      status: 'issued',
-      feeAmount: 50.00,
-      orNumber: 'OR-CAB-2026-8812',
-      idAttachmentName: 'philsys_national_id_front.jpg',
-      attachments: [this.uploadedDocuments.get(doc1Id)!],
-      cryptoHash: cryptoHash,
-      qrPayload: JSON.stringify({
-        ref: issuedRef,
-        doc: 'Barangay Clearance',
-        name: 'MARIA CLARA SANTOS',
-        issued: issueDate,
-        hash: cryptoHash.substring(0, 16) + '...',
-        verifyUrl: `https://cabucbucan.gov.ph/?verify=${issuedRef}`
-      }),
-      signedByOfficialId: officialId,
-      signedByOfficialName: signatory,
-      signedAt: issueDate,
-      digitalSignatureFingerprint: sigResult.keyFingerprint,
-      submittedAt: '2026-08-14T09:00:00Z',
-      reviewedAt: '2026-08-14T14:20:00Z',
-      reviewedByStaffId: staffId,
-      reviewedByStaffName: 'Elena Ramos (Desk Officer)',
-      readyAt: '2026-08-15T10:00:00Z',
-      issuedAt: issueDate,
-      staffRemarks: 'Verified against local voter record and PhilSys ID. No derogatory record on blotter.',
-      notificationsSent: [
-        {
-          id: 'notif-1',
-          type: 'sms',
-          recipient: '09289876543',
-          message: '[BRGY-CABUCBUCAN] Your request for Barangay Clearance #BC-2026-0842 has been APPROVED by Hon. Cornelio Laugo and is Ready for Collection/Download with digital verification seal.',
-          timestamp: '2026-08-15T10:35:00Z',
-          status: 'delivered',
-          targetRole: 'resident',
-          title: 'Ready for Collection',
-          residentId: resident2Id,
-          residentName: 'Maria Clara Santos',
-          applicationId: issuedReqId,
-          referenceNumber: issuedRef,
-          documentType: 'barangay_clearance'
-        }
-      ]
-    });
-
-    // Sample Request 2: Certificate of Indigency (Under Review)
-    this.requests.set(req2Id, {
-      id: req2Id,
-      referenceNumber: 'IND-2026-0193',
-      residentId: resident2Id,
-      residentName: 'Maria Clara Santos',
-      residentAddress: 'Purok 2, Barangay Cabucbucan, Rizal, Nueva Ecija',
-      purok: 'Purok 2',
-      documentType: 'certificate_of_indigency',
-      purpose: 'Financial Medical Assistance at Nueva Ecija Provincial Hospital',
-      urgency: 'urgent_medical',
-      status: 'under_review',
-      monthlyIncome: 8500,
-      assistanceType: 'Medical Hospitalization Assistance (DSWD)',
-      feeAmount: 0.00, // Indigency is free
-      idAttachmentName: 'umid_card_scan.pdf',
-      attachments: [this.uploadedDocuments.get(doc2Id)!],
-      submittedAt: '2026-08-20T11:15:00Z',
-      reviewedAt: '2026-08-21T08:30:00Z',
-      reviewedByStaffId: staffId,
-      reviewedByStaffName: 'Elena Ramos (Desk Officer)',
-      staffRemarks: 'Endorsed for priority Captain signature due to urgent medical scheduled tomorrow.',
-      notificationsSent: [
-        {
-          id: 'notif-2',
-          type: 'sms',
-          recipient: '09289876543',
-          message: '[BRGY-CABUCBUCAN] Your Indigency Certificate application #IND-2026-0193 is currently UNDER REVIEW by Desk Staff.',
-          timestamp: '2026-08-21T08:31:00Z',
-          status: 'delivered',
-          targetRole: 'resident',
-          title: 'Under Review',
-          residentId: resident2Id,
-          residentName: 'Maria Clara Santos',
-          applicationId: req2Id,
-          referenceNumber: 'IND-2026-0193',
-          documentType: 'certificate_of_indigency'
-        },
-        {
-          id: 'notif-2-staff',
-          type: 'email',
-          recipient: 'Barangay Staff Desk',
-          message: '[DESK ALERT] Priority Medical Indigency application #IND-2026-0193 submitted by Maria Clara Santos. Ready for endorsement.',
-          timestamp: '2026-08-20T11:16:00Z',
-          status: 'delivered',
-          targetRole: 'staff',
-          title: 'Priority Medical Application',
-          residentId: resident2Id,
-          residentName: 'Maria Clara Santos',
-          applicationId: req2Id,
-          referenceNumber: 'IND-2026-0193',
-          documentType: 'certificate_of_indigency'
-        }
-      ]
-    });
-
-    // Sample Request 3: Business Clearance (For Signature)
-    const req3Id = 'req-2026-003';
-    this.requests.set(req3Id, {
-      id: req3Id,
-      referenceNumber: 'BUS-2026-0419',
-      residentId: resident2Id,
-      residentName: 'Maria Clara Santos',
-      residentAddress: 'Purok 2, Barangay Cabucbucan, Rizal, Nueva Ecija',
-      purok: 'Purok 2',
-      documentType: 'business_permit',
-      purpose: 'New Barangay Business Clearance for Agri-Supply & Sari-Sari Store',
-      urgency: 'standard',
-      status: 'for_signature',
-      businessName: 'Santos Rice & Agri-Supply Store',
-      businessNature: 'Retail of Rice, Feed & General Merchandise',
-      businessAddress: 'Purok 2, Barangay Cabucbucan, Rizal, Nueva Ecija',
-      feeAmount: 350.00,
-      orNumber: 'OR-CAB-2026-9044',
-      idAttachmentName: 'dti_registration_certificate.pdf',
-      attachments: [],
-      submittedAt: '2026-08-19T14:00:00Z',
-      reviewedAt: '2026-08-20T10:00:00Z',
-      reviewedByStaffId: staffId,
-      reviewedByStaffName: 'Elena Ramos (Desk Officer)',
-      staffRemarks: 'Sanitary and local zoning inspection cleared. Awaiting Punong Barangay Cornelio Laugo cryptographic seal.',
-      notificationsSent: [
-        {
-          id: 'notif-3',
-          type: 'sms',
-          recipient: '09289876543',
-          message: '[BRGY-CABUCBUCAN] Your Business Clearance #BUS-2026-0419 has been forwarded to Hon. Cornelio Laugo FOR SIGNATURE.',
-          timestamp: '2026-08-20T10:05:00Z',
-          status: 'delivered',
-          targetRole: 'resident',
-          title: 'Forwarded For Signature',
-          residentId: resident2Id,
-          residentName: 'Maria Clara Santos',
-          applicationId: req3Id,
-          referenceNumber: 'BUS-2026-0419',
-          documentType: 'business_permit'
-        },
-        {
-          id: 'notif-3-official',
-          type: 'email',
-          recipient: 'Hon. Cornelio Laugo Desk',
-          message: '[SIGNATURE PENDING] Business Clearance #BUS-2026-0419 for Santos Rice & Agri-Supply Store endorsed by Elena Ramos. Awaiting Captain signature.',
-          timestamp: '2026-08-20T10:06:00Z',
-          status: 'delivered',
-          targetRole: 'official',
-          title: 'Document Pending Signature',
-          residentId: resident2Id,
-          residentName: 'Maria Clara Santos',
-          applicationId: req3Id,
-          referenceNumber: 'BUS-2026-0419',
-          documentType: 'business_permit'
-        }
-      ]
-    });
-
     // Seed Immutable Audit Logs with Initial Blockchain-like Hash Chaining
     this.appendAuditLog({
       userId: 'SYSTEM_BOOT',
@@ -675,19 +370,6 @@ class ParameterizedDatabase {
       severity: 'INFO',
       details: 'IAS Compliant Relational Database tables initialized with AES/SHA-256 integrity checks, MFA TOTP engine, and Antivirus file scanner.',
       resourceType: 'SYSTEM'
-    });
-
-    this.appendAuditLog({
-      userId: officialId,
-      userName: 'Hon. Cornelio Laugo',
-      userRole: 'official',
-      ipAddress: '192.168.1.10',
-      actionType: 'DIGITAL_SIGNATURE_APPLIED',
-      category: 'CLEARANCE',
-      severity: 'INFO',
-      details: `Generated cryptographic HMAC-SHA256 seal for Barangay Clearance #BC-2026-0842 (Barangay Cabucbucan, Rizal, Nueva Ecija)`,
-      resourceType: 'CLEARANCE_REQUEST',
-      resourceId: issuedReqId
     });
   }
 

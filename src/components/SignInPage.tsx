@@ -4,7 +4,7 @@ import {
   HelpCircle, UploadCloud, X, Check, Mail, Phone,
   MapPin, Shield, ArrowRight, RefreshCw, KeyRound, UserPlus,
   LogIn, FileText, Clipboard, Sliders, Settings, Info, Copy, Edit3,
-  ExternalLink, ShieldCheck, Clock
+  ExternalLink, ShieldCheck, Clock, Sparkles
 } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
@@ -45,10 +45,10 @@ export const ROLE_DEMO_ACCOUNTS: Record<'resident' | 'staff' | 'official', {
   actualPassword: string;
 }> = {
   resident: {
-    name: 'Maria Clara Santos',
-    title: 'Constituent · Purok 2',
+    name: 'Ricardo Dalisay',
+    title: 'Constituent · Purok 3',
     roleBadge: 'Resident',
-    username: 'maria.santos',
+    username: 'ricardo.dalisay',
     passwordHint: 'Salted BCrypt ($2a$10$)',
     actualPassword: 'Resident@2026!'
   },
@@ -99,6 +99,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
   const [showPhoneEdit, setShowPhoneEdit] = useState<boolean>(false);
   const [newPhoneInput, setNewPhoneInput] = useState<string>('');
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
+  const [autoFillingOtp, setAutoFillingOtp] = useState<boolean>(false);
   const [otpExpirySeconds, setOtpExpirySeconds] = useState<number>(300);
   const [mfaTargetUser, setMfaTargetUser] = useState<{
     id: string;
@@ -797,6 +798,28 @@ export const SignInPage: React.FC<SignInPageProps> = ({
     }
   };
 
+  const handleQuickFetchAndFillOtp = async () => {
+    try {
+      setAutoFillingOtp(true);
+      setErrorMsg('');
+      const query = new URLSearchParams();
+      if (mfaTargetUser?.challengeId) query.set('challengeId', mfaTargetUser.challengeId);
+      if (mfaTargetUser?.email) query.set('email', mfaTargetUser.email);
+      const res = await fetch(`/api/auth/otp-mailer/latest?${query.toString()}`);
+      const data = await res.json();
+      if (data.success && data.message?.otpCode) {
+        setMfaCode(data.message.otpCode);
+        setResetSuccessMsg(`Code [ ${data.message.otpCode} ] retrieved from Official OTP Mailer and auto-filled! Click "Verify & Enter Portal" below.`);
+      } else {
+        setShowOtpMailer(true);
+      }
+    } catch {
+      setShowOtpMailer(true);
+    } finally {
+      setAutoFillingOtp(false);
+    }
+  };
+
   return (
     <div className="min-h-screen ios-blur-canvas text-slate-100 flex flex-col justify-between font-sans selection:bg-blue-600 selection:text-white relative overflow-x-hidden">
       
@@ -1074,6 +1097,17 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                         </span>
                       </button>
 
+                      {/* Instant 1-Click Auto-Fill from OTP Mailer */}
+                      <button
+                        type="button"
+                        onClick={handleQuickFetchAndFillOtp}
+                        disabled={autoFillingOtp}
+                        className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>{autoFillingOtp ? 'Fetching Passcode...' : '⚡ Instant Auto-Fill Passcode from OTP Mailer'}</span>
+                      </button>
+
                       {/* Quick Action Buttons */}
                       <div className="flex items-center gap-2 pt-0.5">
                         <a
@@ -1104,22 +1138,34 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                     <label className="text-xs font-bold text-slate-700 block">
                       {mfaMode === 'sms' ? '6-Digit SMS Verification Code' : '6-Digit Gmail Verification Code'}
                     </label>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          const text = await navigator.clipboard.readText();
-                          const clean = text.replace(/[^0-9]/g, '').slice(0, 6);
-                          if (clean) setMfaCode(clean);
-                        } catch (err) {
-                          console.warn('Clipboard read error:', err);
-                        }
-                      }}
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 hover:text-blue-900 bg-blue-100/70 hover:bg-blue-100 px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
-                    >
-                      <Clipboard className="w-3.5 h-3.5" />
-                      <span>Paste Code</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleQuickFetchAndFillOtp}
+                        disabled={autoFillingOtp}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-100/90 hover:bg-emerald-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                        title="Fetch latest OTP from official mailer"
+                      >
+                        <Sparkles className="w-3 h-3 text-emerald-600" />
+                        <span>Fill Code</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const text = await navigator.clipboard.readText();
+                            const clean = text.replace(/[^0-9]/g, '').slice(0, 6);
+                            if (clean) setMfaCode(clean);
+                          } catch (err) {
+                            console.warn('Clipboard read error:', err);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 hover:text-blue-900 bg-blue-100/70 hover:bg-blue-100 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Clipboard className="w-3.5 h-3.5" />
+                        <span>Paste</span>
+                      </button>
+                    </div>
                   </div>
                   <input
                     type="text"
@@ -1577,7 +1623,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                     required
                     value={regUsername}
                     onChange={(e) => setRegUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
-                    placeholder="e.g. maria.santos"
+                    placeholder="e.g. resident.username"
                     className="w-full px-3 py-2 bg-white/80 border border-slate-300 rounded-xl text-xs text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -1751,7 +1797,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                       required
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="e.g. maria.santos"
+                      placeholder="e.g. resident.username"
                       className="w-full pl-10 pr-3 py-2.5 ios-glass-input rounded-2xl text-xs text-slate-900 font-medium focus:outline-none"
                     />
                   </div>

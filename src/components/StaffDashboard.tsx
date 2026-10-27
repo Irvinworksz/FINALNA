@@ -3,10 +3,11 @@ import {
   AlertCircle, Bell, CheckCircle2, Clock, Eye, FileCheck, Filter, 
   Image as ImageIcon, MessageSquare, Phone, Printer, QrCode, RefreshCw, 
   Search, Send, ShieldAlert, ShieldCheck, UserCheck, X, ZoomIn,
-  Check, Award, MapPin, Mail
+  Check, Award, MapPin, Mail, BarChart3
 } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import type { ClearanceRequest, RequestStatus } from '../types';
+import { StaffAnalyticsView } from './StaffAnalyticsView';
 
 interface StaffDashboardProps {
   requests: ClearanceRequest[];
@@ -19,6 +20,7 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
   onRefresh,
   onViewDocument
 }) => {
+  const [activeTab, setActiveTab] = useState<'queue' | 'analytics'>('queue');
   const [selectedReq, setSelectedReq] = useState<ClearanceRequest | null>(null);
   const [showIdZoomModal, setShowIdZoomModal] = useState<boolean>(false);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -114,29 +116,55 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
     <div className="space-y-6">
       {/* Top Workspace Header */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-1.5 glass-panel rounded-2xl border border-white/80 shadow-sm">
-        <div className="flex items-center gap-1.5">
-          <div className="flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 btn-3d bg-blue-600 text-white shadow-sm">
-            <FileCheck className="w-4 h-4 text-blue-300" />
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setActiveTab('queue')}
+            className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+              activeTab === 'queue'
+                ? 'btn-3d bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+          >
+            <FileCheck className={`w-4 h-4 ${activeTab === 'queue' ? 'text-blue-300' : 'text-slate-500'}`} />
             <span>Clearance Applications Queue</span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white/20 text-white">
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+              activeTab === 'queue' ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-700'
+            }`}>
               {requests.length}
             </span>
-          </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('analytics')}
+            className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+              activeTab === 'analytics'
+                ? 'btn-3d bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+          >
+            <BarChart3 className={`w-4 h-4 ${activeTab === 'analytics' ? 'text-blue-300' : 'text-slate-500'}`} />
+            <span>Data & Scalability Analytics</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2 px-2">
-          <button
-            type="button"
-            onClick={() => onRefresh()}
-            className="px-3 py-1.5 btn-3d-secondary text-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer ml-auto"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Refresh Queue</span>
-          </button>
+          {activeTab === 'queue' && (
+            <button
+              type="button"
+              onClick={() => onRefresh()}
+              className="px-3 py-1.5 btn-3d-secondary text-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer ml-auto"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Refresh Queue</span>
+            </button>
+          )}
         </div>
       </div>
 
-      <>
+      {activeTab === 'queue' ? (
+        <>
         {/* Overview Metric Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="p-5 glass-card rounded-3xl border border-white/80 shadow-md hover:shadow-xl transition-all space-y-1.5 relative overflow-hidden group">
@@ -354,7 +382,10 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
               </table>
             </div>
           </div>
-      </>
+        </>
+      ) : (
+        <StaffAnalyticsView />
+      )}
 
       {/* Review Modal */}
       {selectedReq && (

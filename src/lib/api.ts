@@ -1,4 +1,4 @@
-import type { AuditLog, ClearanceRequest, ClearanceType, NotificationRecord, ResidentProfile, SecurityStats, User, VerificationResult } from '../types';
+import type { AuditLog, ClearanceRequest, ClearanceType, NotificationRecord, ResidentProfile, SecurityStats, StaffAnalyticsData, User, VerificationResult } from '../types';
 
 const TOKEN_KEY = 'barangay_auth_token';
 const USER_KEY = 'barangay_auth_user';
@@ -656,5 +656,10 @@ export const apiClient = {
   // Cybersecurity Administration & System Diagnostics
   async getDiagnostics() {
     return makeRequest<any>('/api/admin/diagnostics');
+  },
+
+  // Data & Scalability Analytics Center
+  async getStaffAnalytics() {
+    return makeRequest<StaffAnalyticsData>('/api/staff/analytics-scalability');
   }
 };

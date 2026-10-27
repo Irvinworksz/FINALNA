@@ -68,7 +68,7 @@ const GUIDES_DATA: Record<RoleGuideType, GuideContent> = {
       }
     ],
     demoAccount: {
-      name: 'Maria Clara Santos',
+      name: 'Resident Constituent',
       title: 'Registered Resident (Purok 1)',
       role: 'resident'
     }

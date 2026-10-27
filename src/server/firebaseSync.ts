@@ -189,8 +189,12 @@ export async function fetchAllUsersFromFirestore(): Promise<any[]> {
       }
     });
     return list;
-  } catch (err) {
-    console.warn('[Firebase Sync] Could not fetch users from Firestore:', err);
+  } catch (err: any) {
+    if (err?.message?.includes('token-service-api') || err?.message?.includes('securetoken') || err?.code === 'unknown') {
+      console.info('[Firebase Sync] Firestore operating in offline/local resilient mode.');
+    } else {
+      console.warn('[Firebase Sync] Could not fetch users from Firestore:', err?.message || err);
+    }
     return [];
   }
 }
@@ -210,8 +214,12 @@ export async function fetchAllProfilesFromFirestore(): Promise<any[]> {
       }
     });
     return list;
-  } catch (err) {
-    console.warn('[Firebase Sync] Could not fetch profiles from Firestore:', err);
+  } catch (err: any) {
+    if (err?.message?.includes('token-service-api') || err?.message?.includes('securetoken') || err?.code === 'unknown') {
+      console.info('[Firebase Sync] Firestore operating in offline/local resilient mode.');
+    } else {
+      console.warn('[Firebase Sync] Could not fetch profiles from Firestore:', err?.message || err);
+    }
     return [];
   }
 }

@@ -1,33 +1,34 @@
-# Firebase Official Email Link 2FA Sign-In Plan
+# Barangay Portal: Data Analytics & Scalability Intelligence Center
 
-Deliver real Two-Factor Authentication emails directly to your registered Gmail (`carinok92@gmail.com`) using **Firebase Authentication's Official Email Link Service**—the exact same Google mail infrastructure that delivers your password reset emails.
+Integrate a dedicated, academic-grade **Data & Scalability Analytics Center** into the Barangay Staff Portal to satisfy course requirements for the **Data and Scalability** subject, combining real-time civic governance analytics with system scalability performance metrics.
 
 ---
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following choices were confirmed with you during the interview phase and are prioritized in this implementation:
+> The following choices were confirmed with you during the interview phase and govern this implementation plan:
 
-- **Confirmed Delivery Mode**: **Use Firebase official email sign-in link like password reset**. Instead of relying on Nodemailer SMTP (which required a 16-character Google App Password), the portal will call Google's native Firebase Auth email service (`sendSignInLinkToEmail`). Google's own mail servers will deliver the official email directly to your Gmail inbox.
-- **Confirmed Target Address**: **Sent directly to your registered Gmail address** (`carinok92@gmail.com` or your registered resident email).
-- **Zero Configuration Burden**: No SMTP setup, no App Password, and no mail server credentials required. It works out-of-the-box just like the password reset emails you already receive from Google.
+- **Confirmed Analytics Scope**: **Both governance service analytics and technical scalability metrics**. The dashboard will present dual perspectives: civic data insights (demographics by purok, request volume trends, revenue realization, turnaround time) and computer science scalability metrics (query latency distribution, cache efficiency, indexing performance, time complexity analysis).
+- **Confirmed Location**: **Dedicated Analytics and Scalability tab in the staff portal**. Added alongside the existing "Clearance Applications Queue" header in `StaffDashboard.tsx` with seamless tab switching.
+- **Confirmed Tooling Restraint**: **Display visual charts and metrics without export or simulation tools**. Focus strictly on clean, high-density visual charts, tabular metrics, and real data aggregations without cluttering the interface with mock load simulators or export modals.
 
 ---
 
 ## 1. Overview & Core Concept
 
 ### What It Does
-When a registered resident signs into the portal:
-1. Entering username/email and password validates credentials against BCrypt.
-2. For Two-Factor Authentication, the client calls Firebase Auth SDK's `sendSignInLinkToEmail(auth, registeredEmail, actionCodeSettings)`.
-3. Google Firebase sends an authentic email directly to your registered Gmail with an official sign-in verification link.
-4. When you open your Gmail and click the link (or click "Verify Email Link"):
-   - Firebase Authentication securely verifies your email link (`isSignInWithEmailLink`).
-   - The portal completes the authentication handshake with the backend and opens your verified Resident Dashboard.
-5. If you prefer to stay on the page without opening the link, you can also use:
-   - Direct Google Sign-In button (one-click bypass).
-   - 6-digit database security code with instant autofill.
+Provides Barangay Cabucbucan staff and reviewing professors with an executive-level, dual-engine analytics center:
+1. **Civic Data & Demographics Engine**: Live breakdown of resident population by Purok (Purok 1 to 7), clearance demand by document type, application approval vs. rejection ratios, revenue collected vs. indigent waivers, and average staff review turnaround time.
+2. **Scalability & Performance Engineering Engine**: System telemetry demonstrating how the application handles data volume:
+   - **Database Query Latency**: Real-time response times for indexed lookups versus table scans.
+   - **Cache & Memory Efficiency**: In-memory cache hit ratio, resident record indexing footprint, and hash chain computation overhead.
+   - **Concurrency & Throughput**: Request rate tracking against rate limiter capacity.
+   - **Big-O Scalability Analysis**: Theoretical and practical scaling projections showing data structures ($O(1)$ Hash Maps vs. $O(N)$ linear scans) when scaling to 10,000+ residents.
+
+### Target Audience & Persona
+- **Barangay Staff & Officials**: To spot community trends (e.g. which purok has the highest indigent certification requests or clearance volume) and optimize processing turnaround times.
+- **Course Professor & Academic Reviewers**: To evaluate concrete application of database indexing, query optimization, data aggregation pipelines, and computational scalability under high transaction volumes.
 
 ---
 
@@ -35,130 +36,137 @@ When a registered resident signs into the portal:
 
 ### Key User Flows
 
-#### Flow 1: Sign-In with Official Firebase Email Link
+#### Flow 1: Accessing the Analytics Center in Staff Account
 ```
-[Sign-In Form] ──> Enter Username & Password ──> Click 'Sign In'
-       │
-       ▼
-[2FA Challenge Screen]
-  ├── Status: "Official Google Firebase Verification Email Sent!"
-  ├── Recipient: "Sent to your registered Gmail: carinok92@gmail.com"
-  ├── Instruction: "Open your Gmail inbox and click the official sign-in link."
-  ├── [Open Gmail Inbox (gmail.com)] Shortcut Button
-  ├── [Resend Verification Email] (with 60s cooldown timer)
-  └── Alternative Options:
-      ├── [Sign In with Google (Skip Link)]
-      └── [Enter 6-Digit Passcode Instead]
-```
-
-#### Flow 2: Returning from Gmail Link Click
-```
-User clicks link in Gmail (https://ais-dev-.../?apiKey=...&mode=signIn)
-       │
-       ▼
-App boots and detects 'isSignInWithEmailLink'
-       │
-       ▼
-Firebase completes email sign-in ──> Backend issues resident session JWT
-       │
-       ▼
-Redirects to Resident Dashboard with celebratory welcome banner!
+[Staff Dashboard]
+  │
+  ├── Tab 1: [Clearance Applications Queue] (Existing processing workflow)
+  │
+  └── Tab 2: [Data & Scalability Analytics] (New active view)
+        │
+        ├── Header: Sub-view filter [All Analytics · Civic Data · System Scalability]
+        ├── Live Stat Cards: Total Processed · Avg Latency · Cache Hit Rate · Revenue Realized
+        │
+        ├── Section A: Civic Governance & Demographic Intelligence
+        │     ├── Purok Population & Demand Distribution (CSS Bar Chart)
+        │     ├── Document Type Volume Breakdown (Radial / Proportion Meter)
+        │     └── Request Lifecycle & Turnaround Velocity Matrix
+        │
+        └── Section B: Systems Architecture & Scalability Telemetry
+              ├── Query Latency Benchmark (P50 / P95 / P99 in milliseconds)
+              ├── Indexing & Memory Footprint (Active entities, memory pool)
+              └── Scalability Model Card: O(1) Indexing vs Data Growth Curve
 ```
 
 ### Visual Identity & Theme
-- **Surface**: High-elevation frosted glassmorphism (`glass-panel`, `glass-card`) layered over deep ambient twilight blue background (`#0b1329`).
-- **Typography**: Display headlines set in `Outfit` / `Plus Jakarta Sans`; monospace email tags in `JetBrains Mono`.
-- **Status Banners**: Emerald verification status highlighting that the email was dispatched via Google Cloud servers.
-- **Zero-Pill Restraint**: Unboxed metadata with clean typographic separators (`·`).
+- **Layout Architecture**: Full-width 1440px dashboard layout matching the staff interface, adhering strictly to the `SaaS & Dashboard` guidelines in `frontend-design`.
+- **Zero-Pill Restraint**: Metadata rendered with clean typographic separators (`·`), avoiding colored capsule badges on static text.
+- **Tabular Figures**: Every numeric figure, latency millisecond, percentage, and currency value formatted with `font-mono tabular-nums` to prevent layout jitter.
+- **Light/Dark Balanced Palette**:
+  - Dominant Neutral: Clean slate card backgrounds (`glass-card`) with subtle 1px border lines (`border-slate-200/80`).
+  - Semantic Metric Accents: Royal Blue (`#2563eb`) for civic operations, Emerald (`#059669`) for high cache efficiency/approved documents, Indigo (`#4f46e5`) for database throughput, Amber (`#d97706`) for pending queues.
+- **High-Fidelity Native Charts**: Pure SVG/CSS micro-charts (responsive bar graphs, percentage distribution tracks, latency distribution meters) designed with mathematical precision, avoiding bloated third-party chart dependencies.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-### Decision 1: Native Firebase Auth `sendSignInLinkToEmail`
-- **Chosen Approach**: Use Firebase Authentication's native passwordless email link mechanism (`sendSignInLinkToEmail`) for Two-Factor sign-in verification.
-- **Why**: Google handles all SMTP, DKIM, SPF, and delivery infrastructure automatically. Emails arrive reliably in the user's Gmail inbox without needing a custom SMTP server or Google App Password.
-- **Alternatives Considered**: Gmail SMTP with Nodemailer — rejected by user preference because standard Gmail accounts require manually creating and entering a 16-character App Password.
+### Decision 1: Combined Civic Data & Scalability Perspectives
+- **Chosen Approach**: Surface both real-world civic metrics (e.g., indigent requests per purok) and computer science scalability telemetry (query latency, cache efficiency, algorithm complexity).
+- **Why**: Directly satisfies both the functional barangay portal requirements and the academic grading rubric for the "Data and Scalability" subject.
+- **Alternatives Considered**: Showing only technical telemetry was rejected because it ignores the actual civic data collected by the portal.
 
-### Decision 2: Automatic URL Listener & Seamless In-App Completion
-- **Chosen Approach**: When the application loads, check `isSignInWithEmailLink(auth, window.location.href)`. If true, automatically finish sign-in and redirect to the dashboard.
-- **Why**: Allows users on mobile or desktop to click the link directly in their Gmail app or browser and instantly enter their resident portal.
+### Decision 2: Native In-Database Aggregation Endpoint
+- **Chosen Approach**: Implement `GET /api/staff/analytics-scalability` on the Express backend, querying the live `ParameterizedDatabase` instance to compute real aggregations, query execution timings, and memory profiling.
+- **Why**: Ensures metrics are 100% genuine and reflect actual database state (real resident profiles, actual clearance requests, real audit logs), not hardcoded static numbers.
+- **Alternatives Considered**: Calculating entirely client-side would require downloading the entire database to the browser, violating scalability principles.
 
-### Decision 3: Dual Fallback Preservation
-- **Chosen Approach**: Retain the 6-digit manual code input and direct Google Sign-In button as secondary tabs or toggles on the 2FA screen.
-- **Why**: Guarantees zero lockout risk even if the user does not want to leave the active browser tab.
+### Decision 3: Pure Visual Metric Architecture (No Simulation Clutter)
+- **Chosen Approach**: In alignment with the user's explicit preference, present clear, clean visual charts, metric grids, and technical explanation cards without load simulation buttons or export modals.
+- **Why**: Keeps the staff UI pristine, highly professional, and focused on insight comprehension.
 
 ---
 
 ## 4. Technical Architecture & Data Strategy
 
-### System Layout & Flow Diagram
+### System Diagram & Data Flow
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        Barangay Portal Client                          │
+│                         Barangay Staff Portal                          │
 │                                                                        │
 │   ┌────────────────────────────────────────────────────────────────┐   │
-│   │                         SignInPage                             │   │
+│   │                      StaffDashboard.tsx                        │   │
 │   │                                                                │   │
-│   │   [Enter Credentials] ──> Validated by Backend Server          │   │
-│   │                                  │                             │   │
-│   │                                  ▼                             │   │
-│   │   [2FA Challenge Screen]                                       │   │
-│   │      │                                                         │   │
-│   │      ├── Calls sendFirebaseSignInEmailLink(userEmail)          │   │
-│   │      │                                                         │   │
-│   └──────┼─────────────────────────────────────────────────────────┘   │
-│          │                                                             │
-└──────────┼─────────────────────────────────────────────────────────────┘
-           │
-           ▼
+│   │   [Header Tabs]                                                │   │
+│   │     ├── Tab: Applications Queue                                │   │
+│   │     └── Tab: Data & Scalability Analytics (Active)             │   │
+│   │               │                                                │   │
+│   │               ▼                                                │   │
+│   │        <StaffAnalyticsView />                                  │   │
+│   │          ├── Civic Demographics & Request Charts               │   │
+│   │          └── Query Latency & Scalability Telemetry Cards       │   │
+│   └───────────────────────────────┬────────────────────────────────┘   │
+└───────────────────────────────────┼────────────────────────────────────┘
+                                    │
+                                    │ HTTP GET /api/staff/analytics-scalability
+                                    │ Authorization: Bearer <Staff-JWT>
+                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│               Google Firebase Authentication Cloud Server               │
+│                        Express Backend (server.ts)                     │
 │                                                                        │
-│   • Generates cryptographic action link                                │
-│   • Dispatches official email to carinok92@gmail.com                   │
-│   • From: noreply@favorable-outlook-98chg.firebaseapp.com              │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   ▼
-                         User's Gmail Inbox
-                       (carinok92@gmail.com)
-                                   │
-                    User clicks verification link
-                                   │
-                                   ▼
+│   • Authenticates staff/admin role                                     │
+│   • Computes aggregations with performance.now() latency profiling     │
+│   • Queries ParameterizedDatabase:                                     │
+│       - Profiles group-by purok, age, civilStatus                      │
+│       - Requests group-by status, docType, payment                     │
+│       - AuditLogs volume & timeline velocity                           │
+│       - Cache stats & active memory footprint                          │
+│   • Returns structured JSON payload                                    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        Barangay Portal Client                          │
+│                     Database Kernel (src/server/db.ts)                 │
 │                                                                        │
-│   • isSignInWithEmailLink(auth, window.location.href) == true          │
-│   • signInWithEmailLink(auth, email, window.location.href)             │
-│   • Calls POST /api/auth/firebase-email-link-login                     │
-│   • Issues JWT Token and logs resident into Dashboard!                 │
+│   • In-memory indexed Maps: O(1) resident & request lookups            │
+│   • Tamper-evident SHA-256 hash-chained audit log chain                │
+│   • Real-time synchronization state with Firestore                     │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Component & File Changes
-1. **`src/lib/firebase.ts`**:
-   - Add `sendFirebaseSignInEmailLink(email: string)` with `ActionCodeSettings` configured for the current origin.
-   - Add `completeFirebaseEmailLinkSignIn(email?: string)` to parse incoming email link from the URL.
-2. **`server.ts`**:
-   - Add endpoint `POST /api/auth/firebase-email-link-login`: accepts verified Firebase `email`, `idToken`, and `uid`; issues JWT session and returns user profile.
-3. **`src/components/SignInPage.tsx`**:
-   - On 2FA initiation, trigger `sendFirebaseSignInEmailLink(targetEmail)`.
-   - Display the dedicated Firebase Email Link verification card with instructions, "Open Gmail" shortcut, and resend button.
-   - Detect email link upon URL boot and finalize login automatically.
+### Component Breakdown
+1. **`src/components/StaffAnalyticsView.tsx`** (New Component):
+   - Renders the civic and scalability analytics views with responsive tab filters (`All`, `Civic Data`, `System Scalability`).
+   - Interactive KPI metric cards with change indicators and tabular numbers.
+   - Custom SVG/CSS demographic charts (distribution by Purok 1–7, document type distribution, revenue breakdown).
+   - Technical scalability panel: Query response times (P50/P95/P99), indexing efficiency, memory footprint, and time complexity breakdown.
+2. **`src/components/StaffDashboard.tsx`**:
+   - Add tab switcher in the header between "Clearance Applications Queue" and "Data & Scalability Analytics".
+   - Mount `<StaffAnalyticsView />` when the analytics tab is selected.
+3. **`server.ts`**:
+   - Add endpoint `GET /api/staff/analytics-scalability` protected by staff/admin authentication middleware.
+   - Gathers live statistics:
+     - Total resident accounts & demographic distribution across Puroks 1 to 7.
+     - Clearance request counts grouped by status (`submitted`, `under_review`, `for_signature`, `issued`, `rejected`).
+     - Document category demand percentages.
+     - Total revenue generated and indigent fee exemptions granted.
+     - Live database execution timing: time taken to query indexed maps vs linear scans.
+     - Memory allocation and record count metrics.
+4. **`src/lib/api.ts`**:
+   - Add `getAnalyticsData()` method to `apiClient` with proper TypeScript return types.
 
 ---
 
 ## Verification & Testing Plan
 
-1. **Compilation & Linting**:
-   - Run `lint_applet` and `compile_applet` to confirm zero TypeScript or Rollup build errors.
-2. **Email Link Dispatch Test**:
-   - Trigger sign-in for resident account with email `carinok92@gmail.com`.
-   - Verify `sendSignInLinkToEmail` succeeds without errors.
-   - Confirm the 2FA UI shows delivery confirmation to `carinok92@gmail.com`.
-3. **Email Link Verification & Login Test**:
-   - Test email link completion flow.
-   - Test fallback options (Google Sign-In button and 6-digit passcode).
+1. **Compilation & Type Safety**:
+   - Run `compile_applet` (`npm run build`) and `lint_applet` (`tsc --noEmit`) to verify zero TypeScript errors.
+2. **Endpoint Verification**:
+   - Test `GET /api/staff/analytics-scalability` with staff JWT credentials to verify data structure and execution timings.
+3. **UI / UX Testing**:
+   - Log in as staff (`staff_desk` / `Staff@2026!`).
+   - Switch between "Clearance Applications Queue" and "Data & Scalability Analytics".
+   - Verify all charts (Purok demographic bar graph, document type distribution, fee collections) render correctly with real numbers.
+   - Verify the Scalability Telemetry panel displays valid query timings, cache metrics, and the complexity analysis card.
+   - Verify zero layout shift, tabular numerals, and responsive design on desktop and mobile viewports.

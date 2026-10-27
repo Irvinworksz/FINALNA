@@ -261,3 +261,57 @@ export interface VerificationResult {
   tamperAlert?: boolean;
   message: string;
 }
+
+export interface StaffAnalyticsData {
+  civic: {
+    totalResidents: number;
+    verifiedResidents: number;
+    pendingVerifications: number;
+    totalClearanceRequests: number;
+    completedRequests: number;
+    pendingReviewRequests: number;
+    rejectedRequests: number;
+    purokDistribution: { purok: string; residentCount: number; requestCount: number }[];
+    documentTypeDistribution: { type: ClearanceType; label: string; count: number; percentage: number }[];
+    revenue: {
+      totalCollected: number;
+      totalWaivedIndigent: number;
+      paidTransactionsCount: number;
+      freeIndigentCount: number;
+    };
+    turnaroundMetrics: {
+      avgTurnaroundHours: number;
+      approvalRatePercentage: number;
+      activeStaffCount: number;
+    };
+  };
+  scalability: {
+    queryLatency: {
+      indexedLookupMs: number;
+      linearScanBenchmarkMs: number;
+      p50LatencyMs: number;
+      p95LatencyMs: number;
+      p99LatencyMs: number;
+    };
+    systemLoad: {
+      requestsPerMinute: number;
+      rateLimitCeiling: number;
+      rateLimitUsagePercent: number;
+      activeMemoryHeapMb: number;
+      totalMemoryRssMb: number;
+    };
+    cacheAndStorage: {
+      inMemoryEntityCount: number;
+      cacheHitRatio: number;
+      auditChainBlocksCount: number;
+      hashIntegrityVerified: boolean;
+      diskPersistenceBytes: number;
+    };
+    algorithmComplexity: {
+      residentLookupComplexity: string;
+      clearanceFilterComplexity: string;
+      auditChainAppendComplexity: string;
+      projectedLatencyAt10kUsersMs: number;
+    };
+  };
+}
