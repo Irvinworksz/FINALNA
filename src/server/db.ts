@@ -13,9 +13,9 @@ import {
   PROFILE_ENCRYPTED_FIELDS,
   DOCUMENT_ENCRYPTED_FIELDS,
   ENCRYPTION_KEY_FINGERPRINT
-} from './crypto.js';
-import { generateSampleIdDataUrl } from '../lib/sampleIds.js';
-import type { AuditLog, ClearanceRequest, NotificationRecord, ResidentProfile, ResidentVerificationRecord, UploadedDocument, User, UserRole, WebAuthnCredential } from '../types.js';
+} from './crypto.ts';
+import { generateSampleIdDataUrl } from '../lib/sampleIds.ts';
+import type { AuditLog, ClearanceRequest, NotificationRecord, ResidentProfile, ResidentVerificationRecord, UploadedDocument, User, UserRole, WebAuthnCredential } from '../types.ts';
 
 export interface SystemEmailSettings {
   gmailUser?: string;
@@ -1323,6 +1323,14 @@ class ParameterizedDatabase {
 
   public getUploadedFilesCount(): number {
     return this.uploadedDocuments.size;
+  }
+
+  public getProfilesCount(): number {
+    return this.profiles.size;
+  }
+
+  public getLastAuditHash(): string {
+    return this.lastAuditHash;
   }
 
   public getSqlSchemaDDL(dialect: 'mysql' | 'postgresql' | 'sqlite' = 'mysql'): string {

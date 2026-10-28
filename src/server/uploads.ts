@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import type { Request } from 'express';
-import { MAX_FILE_SIZE_BYTES } from './fileScanner.js';
+import { MAX_FILE_SIZE_BYTES } from './fileScanner.ts';
 
 // Secure storage directory located outside webroot
 export const SECURE_VAULT_DIR = path.join(process.cwd(), 'data', 'secure_document_vault');

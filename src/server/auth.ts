@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
-import type { UserRole } from '../types.js';
-import { db } from './db.js';
+import type { UserRole } from '../types.ts';
+import { db } from './db.ts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'BARANGAY_IAS_SECURE_JWT_SIGNING_KEY_2026_PROD';
 const TOKEN_EXPIRY = '8h';

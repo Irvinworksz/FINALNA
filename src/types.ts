@@ -284,6 +284,11 @@ export interface StaffAnalyticsData {
       approvalRatePercentage: number;
       activeStaffCount: number;
     };
+    processingVelocity?: {
+      averageTurnaroundHours: number;
+      processedTodayCount: number;
+      sameDayIssuanceRate: number;
+    };
   };
   scalability: {
     queryLatency: {
@@ -292,6 +297,7 @@ export interface StaffAnalyticsData {
       p50LatencyMs: number;
       p95LatencyMs: number;
       p99LatencyMs: number;
+      throughputRpsCapacity?: number;
     };
     systemLoad: {
       requestsPerMinute: number;
@@ -299,6 +305,9 @@ export interface StaffAnalyticsData {
       rateLimitUsagePercent: number;
       activeMemoryHeapMb: number;
       totalMemoryRssMb: number;
+      concurrencyHeadroomFactor?: number;
+      dbStatus?: string;
+      resilienceStrategy?: string;
     };
     cacheAndStorage: {
       inMemoryEntityCount: number;

@@ -634,7 +634,7 @@ export const apiClient = {
   // Resident ID Verification Management (Staff & Resident)
   async getStaffResidents() {
     return makeRequest<{
-      data: import('../types.js').ResidentVerificationRecord[];
+      data: import('../types.ts').ResidentVerificationRecord[];
       counts: { total: number; pending: number; verified: number; rejected: number };
     }>('/api/staff/residents');
   },
